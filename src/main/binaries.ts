@@ -17,6 +17,22 @@ export const binDir = base
 export const ytDlpPath = path.join(base, `yt-dlp${exe}`)
 export const ffmpegPath = path.join(base, `ffmpeg${exe}`)
 export const ffprobePath = path.join(base, `ffprobe${exe}`)
+export const denoPath = path.join(base, `deno${exe}`)
+
+/**
+ * yt-dlp deprecated YouTube extraction without a JavaScript runtime — without one
+ * some formats can go missing. It only auto-detects deno, and a clean machine has
+ * none, so point it at a bundled copy when one is there. Optional: drop deno into
+ * resources/bin/<platform>/ (npm run binaries -- --with-deno) and this lights up.
+ */
+export function jsRuntimeArgs(): string[] {
+  try {
+    if (fs.existsSync(denoPath)) return ['--js-runtimes', `deno:${denoPath}`]
+  } catch {
+    /* fall through to yt-dlp's own detection */
+  }
+  return []
+}
 
 /** yt-dlp wants the directory, not the executable, for --ffmpeg-location. */
 export const ffmpegDir = base
@@ -27,7 +43,7 @@ export const ffmpegDir = base
  */
 export function ensureExecutable(): void {
   if (process.platform === 'win32') return
-  for (const p of [ytDlpPath, ffmpegPath, ffprobePath]) {
+  for (const p of [ytDlpPath, ffmpegPath, ffprobePath, denoPath]) {
     try {
       if (!fs.existsSync(p)) continue
       const mode = fs.statSync(p).mode & 0o777

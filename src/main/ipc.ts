@@ -2,12 +2,12 @@ import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import type { BinaryVersions, Settings, StartRequest, UpdateResult } from '@shared/types'
 import { FORMAT_IDS } from '@shared/types'
-import { ffmpegPath, ffmpegVersion, selfUpdate, ytDlpPath, ytDlpVersion } from './binaries'
-import { openLog } from './logger'
-import { fetchMeta } from './metadata'
-import { queue } from './queue'
-import { getSettings, saveSettings } from './settings'
-import { isAllowedUrl } from './urls'
+import { ffmpegPath, ffmpegVersion, selfUpdate, ytDlpPath, ytDlpVersion } from './binaries.ts'
+import { openLog } from './logger.ts'
+import { fetchMeta } from './metadata.ts'
+import { queue } from './queue.ts'
+import { getSettings, saveSettings } from './settings.ts'
+import { isAllowedUrl } from './urls.ts'
 
 function asString(value: unknown, max = 4096): string {
   if (typeof value !== 'string') throw new Error('Expected a string.')

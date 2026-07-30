@@ -1,5 +1,4 @@
 import type { FormatId } from '@shared/types'
-import { ffmpegDir } from './binaries'
 
 export const PROGRESS_PREFIX = 'PROG|'
 export const POSTPROCESS_PREFIX = 'PPROG|'
@@ -20,9 +19,14 @@ export interface BuildOptions {
   url: string
   format: FormatId
   outputDir: string
+  /** Directory holding the bundled ffmpeg. Injected so this module stays
+   *  independent of Electron and can be exercised by the integration test. */
+  ffmpegDir: string
   useCookies: boolean
   /** Second pass after a failed mp4 remux: keep the mkv, do not transcode. */
   keepMkv?: boolean
+  /** e.g. ['--js-runtimes', 'deno:<path>'] when a runtime is bundled. */
+  extraArgs?: string[]
 }
 
 /**
@@ -113,22 +117,24 @@ export function buildDownloadArgs(opts: BuildOptions): string[] {
     '--progress',
 
     '--ffmpeg-location',
-    ffmpegDir
+    opts.ffmpegDir
   ]
 
+  if (opts.extraArgs?.length) args.push(...opts.extraArgs)
   if (opts.useCookies) args.push('--cookies-from-browser', 'chrome')
 
   args.push('--', opts.url)
   return args
 }
 
-export function buildMetaArgs(url: string, useCookies: boolean): string[] {
+export function buildMetaArgs(url: string, useCookies: boolean, extraArgs: string[] = []): string[] {
   const args = [
     '--dump-single-json',
     '--no-download',
     '--no-playlist',
     '--no-warnings',
-    '--no-colors'
+    '--no-colors',
+    ...extraArgs
   ]
   if (useCookies) args.push('--cookies-from-browser', 'chrome')
   args.push('--', url)

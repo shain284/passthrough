@@ -37,6 +37,17 @@ const FFMPEG_ARCHIVE = {
   linux: `https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl.tar.xz`
 }
 
+/**
+ * Optional third sidecar. yt-dlp deprecated YouTube extraction without a JS
+ * runtime and only auto-detects deno, so a machine without one can silently lose
+ * formats. Fetch with `--with-deno` (adds ~110 MB to the installer).
+ */
+const DENO = {
+  win32: 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip',
+  darwin: 'https://github.com/denoland/deno/releases/latest/download/deno-aarch64-apple-darwin.zip',
+  linux: 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip'
+}
+
 const exeSuffix = platform === 'win32' ? '.exe' : ''
 
 async function exists(p) {
@@ -129,6 +140,30 @@ async function main() {
     }
   } else {
     process.stdout.write('  ffmpeg already present (pass --force to replace)\n')
+  }
+
+  const denoDest = path.join(outDir, `deno${exeSuffix}`)
+  if (process.argv.includes('--with-deno') && (force || !(await exists(denoDest)))) {
+    const workDir = await (await import('node:fs/promises')).mkdtemp(path.join(os.tmpdir(), 'deno-'))
+    const archive = path.join(workDir, 'deno.zip')
+    try {
+      await download(DENO[platform], archive)
+      if (platform === 'win32') {
+        await execFileAsync('powershell', [
+          '-NoProfile',
+          '-Command',
+          `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${workDir}' -Force`
+        ])
+      } else {
+        await execFileAsync('unzip', ['-oq', archive, '-d', workDir])
+      }
+      const src = path.join(workDir, `deno${exeSuffix}`)
+      await rename(src, denoDest)
+      if (platform !== 'win32') await chmod(denoDest, 0o755)
+      process.stdout.write(`  wrote ${denoDest}\n`)
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
   }
 
   process.stdout.write('Done.\n')

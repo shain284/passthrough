@@ -1,0 +1,71 @@
+appId: com.passthrough.app
+productName: Passthrough
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+
+# The sidecars live outside app.asar so they can be spawned directly and so
+# yt-dlp -U can rewrite itself in place.
+asarUnpack:
+  - resources/bin/**
+
+win:
+  icon: build/icon.png
+  executableName: Passthrough
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  extraResources:
+    - from: resources/bin/win32
+      to: bin/win32
+      filter:
+        - '**/*'
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Passthrough
+  artifactName: ${productName}-${version}-Setup.${ext}
+
+portable:
+  artifactName: ${productName}-${version}-Portable.${ext}
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.utilities
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  extraResources:
+    - from: resources/bin/darwin
+      to: bin/darwin
+      filter:
+        - '**/*'
+
+linux:
+  icon: build/icon.png
+  category: Utility
+  target:
+    - AppImage
+  extraResources:
+    - from: resources/bin/linux
+      to: bin/linux
+      filter:
+        - '**/*'
+
+compression: maximum
+npmRebuild: false
+publish: null

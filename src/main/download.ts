@@ -1,18 +1,14 @@
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import type { FormatId } from '@shared/types'
-import { spawnEnv, ytDlpPath } from './binaries'
-import { FILE_PREFIX, POSTPROCESS_PREFIX, PROGRESS_PREFIX, buildDownloadArgs } from './formats'
-import { log } from './logger'
-import { killTree } from './proc'
+import { ffmpegDir, jsRuntimeArgs, spawnEnv, ytDlpPath } from './binaries.ts'
+import { FILE_PREFIX, POSTPROCESS_PREFIX, PROGRESS_PREFIX, buildDownloadArgs } from './formats.ts'
+import { log } from './logger.ts'
+import { killTree } from './proc.ts'
+import { parseProgressLine } from './progress.ts'
+import type { ProgressUpdate } from './progress.ts'
 
-export interface ProgressUpdate {
-  downloadedBytes?: number
-  totalBytes?: number
-  totalIsEstimate?: boolean
-  speed?: number
-  eta?: number
-}
+export type { ProgressUpdate }
 
 export interface RunOptions {
   url: string
@@ -37,38 +33,6 @@ export interface RunHandle {
   kill(): void
 }
 
-/** yt-dlp prints "NA" for any progress field it does not have. */
-function num(field: string | undefined): number | undefined {
-  if (!field) return undefined
-  const trimmed = field.trim()
-  if (!trimmed || trimmed === 'NA' || trimmed === 'None') return undefined
-  const n = Number(trimmed)
-  return Number.isFinite(n) ? n : undefined
-}
-
-function parseProgress(line: string): ProgressUpdate | null {
-  const parts = line.slice(PROGRESS_PREFIX.length).split('|')
-  if (parts.length < 5) return null
-
-  const downloaded = num(parts[0])
-  const total = num(parts[1])
-  const estimate = num(parts[2])
-  const speed = num(parts[3])
-  const eta = num(parts[4])
-
-  // total_bytes is NA on fragmented streams; fall back to the estimate, and if
-  // that is missing too leave totalBytes undefined so the bar goes indeterminate.
-  const resolvedTotal = total ?? estimate
-
-  return {
-    downloadedBytes: downloaded,
-    totalBytes: resolvedTotal,
-    totalIsEstimate: total === undefined && estimate !== undefined,
-    speed,
-    eta
-  }
-}
-
 /**
  * Spawns yt-dlp for one download. Args are always an array — no shell, no string
  * interpolation, and the URL is passed after `--`.
@@ -78,6 +42,8 @@ export function runDownload(opts: RunOptions): RunHandle {
     url: opts.url,
     format: opts.format,
     outputDir: opts.outputDir,
+    ffmpegDir,
+    extraArgs: jsRuntimeArgs(),
     useCookies: opts.useCookies,
     keepMkv: opts.keepMkv
   })
@@ -129,7 +95,7 @@ export function runDownload(opts: RunOptions): RunHandle {
     if (!trimmed) return
 
     if (trimmed.startsWith(PROGRESS_PREFIX)) {
-      const p = parseProgress(trimmed)
+      const p = parseProgressLine(trimmed)
       if (p) emitProgress(p)
       return
     }

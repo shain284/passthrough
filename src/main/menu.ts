@@ -1,8 +1,8 @@
 import { BrowserWindow, Menu, app, dialog, shell } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
-import { ffmpegVersion, selfUpdate, ytDlpVersion } from './binaries'
-import { openLog } from './logger'
-import { getSettings } from './settings'
+import { ffmpegVersion, selfUpdate, ytDlpVersion } from './binaries.ts'
+import { openLog } from './logger.ts'
+import { getSettings } from './settings.ts'
 
 async function runUpdate(win: BrowserWindow | null): Promise<void> {
   const result = await selfUpdate()

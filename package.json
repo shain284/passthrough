@@ -11,6 +11,9 @@
     "start": "electron-vite preview",
     "build": "npm run typecheck && electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test test/integration.ts",
+    "binaries": "node scripts/fetch-binaries.mjs",
+    "icon": "node scripts/make-icon.mjs",
     "pack:win": "npm run build && electron-builder --win --publish never",
     "pack:dir": "npm run build && electron-builder --dir --publish never"
   },

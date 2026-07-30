@@ -39,6 +39,15 @@ const RULES: Rule[] = [
     }
   },
   {
+    // "Private video. Sign in if you have been granted access to this video" is
+    // recoverable with cookies; a plain private video is not. Order matters.
+    test: /sign in if you have been granted access|granted access to this video/i,
+    error: {
+      message: 'This video is private. If your account has access, turn on "Use browser cookies".',
+      action: 'use-cookies'
+    }
+  },
+  {
     test: /private video|this video is private/i,
     error: { message: 'This video is private.', action: 'none' }
   },
@@ -47,7 +56,9 @@ const RULES: Rule[] = [
     error: { message: 'This video is unavailable or has been removed.', action: 'none' }
   },
   {
-    test: /not available (in|from) your country|geo[- ]?restrict|blocked it in your country|is not available in your location/i,
+    // Covers yt-dlp's actual wording: "The uploader has not made this video
+    // available in your country".
+    test: /available (in|from) your (country|location)|geo[- ]?restrict|blocked it in your country/i,
     error: { message: 'This video is blocked in your region.', action: 'none' }
   },
   {

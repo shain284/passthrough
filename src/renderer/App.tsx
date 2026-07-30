@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BinaryVersions, DownloadItem, FormatId, Settings, VideoMeta } from '@shared/types'
-import { DownloadRow } from './DownloadRow'
-import { duration } from './format'
+import { DownloadRow } from './DownloadRow.tsx'
+import { duration } from './format.ts'
 
 const FORMATS: { id: FormatId; label: string; sub: string }[] = [
   { id: 'mp4', label: 'MP4', sub: 'best video + audio' },

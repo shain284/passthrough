@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process'
 import type { VideoMeta } from '@shared/types'
-import { spawnEnv, ytDlpPath } from './binaries'
-import { buildMetaArgs } from './formats'
-import { mapError } from './errors'
-import { log } from './logger'
-import { normalizeUrl } from './urls'
+import { jsRuntimeArgs, spawnEnv, ytDlpPath } from './binaries.ts'
+import { buildMetaArgs } from './formats.ts'
+import { mapError } from './errors.ts'
+import { log } from './logger.ts'
+import { normalizeUrl } from './urls.ts'
 
 interface DumpJson {
   id?: string
@@ -42,7 +42,7 @@ export function fetchMeta(rawUrl: string, useCookies: boolean): Promise<VideoMet
   return new Promise((resolve, reject) => {
     execFile(
       ytDlpPath,
-      buildMetaArgs(url, useCookies),
+      buildMetaArgs(url, useCookies, jsRuntimeArgs()),
       { timeout: 45000, windowsHide: true, env: spawnEnv(), maxBuffer: 64 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (stderr) log('meta', stderr)

@@ -1,10 +1,10 @@
 import { BrowserWindow, app, shell } from 'electron'
 import path from 'node:path'
-import { ensureExecutable } from './binaries'
-import { bridgeQueueEvents, registerIpc } from './ipc'
-import { log } from './logger'
-import { buildMenu } from './menu'
-import { queue } from './queue'
+import { ensureExecutable } from './binaries.ts'
+import { bridgeQueueEvents, registerIpc } from './ipc.ts'
+import { log } from './logger.ts'
+import { buildMenu } from './menu.ts'
+import { queue } from './queue.ts'
 
 let mainWindow: BrowserWindow | null = null
 const getWindow = (): BrowserWindow | null => mainWindow

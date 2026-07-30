@@ -1,5 +1,5 @@
 import type { DownloadItem, FormatId } from '@shared/types'
-import { bytes, duration, eta, speed } from './format'
+import { bytes, duration, eta, speed } from './format.ts'
 
 const FORMAT_LABELS: Record<FormatId, string> = {
   mp4: 'MP4',
