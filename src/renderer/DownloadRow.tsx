@@ -1,4 +1,4 @@
-import type { DownloadItem, FormatId } from '@shared/types'
+import type { DownloadItem, FormatId } from '../shared/types.ts'
 import { bytes, duration, eta, speed } from './format.ts'
 
 const FORMAT_LABELS: Record<FormatId, string> = {

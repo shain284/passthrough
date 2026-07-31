@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import type { VideoMeta } from '@shared/types'
+import type { VideoMeta } from '../shared/types.ts'
 import { jsRuntimeArgs, spawnEnv, ytDlpPath } from './binaries.ts'
 import { buildMetaArgs } from './formats.ts'
 import { mapError } from './errors.ts'

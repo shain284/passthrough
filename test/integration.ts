@@ -14,6 +14,16 @@ import { test } from 'node:test'
 import os from 'node:os'
 import path from 'node:path'
 
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import {
+  buildFilterComplex,
+  clampReverb,
+  clampSpeed,
+  expectedDuration,
+  mapFxError,
+  parseFfmpegProgress
+} from '../src/main/audiofx.ts'
 import { buildDownloadArgs, FILE_PREFIX, POSTPROCESS_PREFIX } from '../src/main/formats.ts'
 import { parseProgressLine } from '../src/main/progress.ts'
 import { cleanupPartials, killTree } from '../src/main/proc.ts'
@@ -21,7 +31,11 @@ import { isRemuxFailure, mapError } from '../src/main/errors.ts'
 import { normalizeUrl } from '../src/main/urls.ts'
 
 const binDir = path.resolve(import.meta.dirname, '..', 'resources', 'bin', process.platform)
-const ytDlp = path.join(binDir, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp')
+const exe = process.platform === 'win32' ? '.exe' : ''
+const ytDlp = path.join(binDir, `yt-dlp${exe}`)
+const ffmpeg = path.join(binDir, `ffmpeg${exe}`)
+const ffprobe = path.join(binDir, `ffprobe${exe}`)
+const run = promisify(execFile)
 
 /** ~10 minutes of 4K60 — long enough that cancelling lands mid-stream. */
 const LONG_VIDEO = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
@@ -216,6 +230,162 @@ test(
     })
   }
 )
+
+/* -- Slowed + reverb ------------------------------------------------------ */
+
+test('fx inputs are clamped and progress parses', () => {
+  assert.equal(clampSpeed(0.85), 0.85)
+  assert.equal(clampSpeed(3), 1)
+  assert.equal(clampSpeed(0.01), 0.5)
+  assert.equal(clampSpeed(Number.NaN), 0.85)
+  assert.equal(clampReverb(2), 1)
+  assert.equal(clampReverb(-1), 0)
+
+  // Output is the source stretched by the speed change, plus the reverb tail.
+  assert.equal(expectedDuration(60, 0.5), 123)
+  assert.equal(expectedDuration(0, 1), 3)
+
+  assert.equal(parseFfmpegProgress('out_time_us=2500000'), 2.5)
+  // ffmpeg emits the same microsecond value under both keys, so out_time_ms must
+  // NOT be divided by 1000 — that pinned the bar at 100% instantly.
+  assert.equal(parseFfmpegProgress('out_time_ms=2500000'), 2.5)
+  assert.equal(parseFfmpegProgress('out_time_us=-1'), null)
+  assert.equal(parseFfmpegProgress('progress=continue'), null)
+  assert.equal(parseFfmpegProgress('bitrate= 320.0kbits/s'), null)
+})
+
+test('progress parsing matches what ffmpeg actually emits', { timeout: 120_000 }, async () => {
+  await withTempDir(async (dir) => {
+    const src = path.join(dir, 'src.mp3')
+    const out = path.join(dir, 'out.mp3')
+    await run(ffmpeg, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'sine=f=440:d=6:r=44100',
+      '-c:a', 'libmp3lame', '-b:a', '320k', src
+    ])
+
+    const { stdout } = await run(
+      ffmpeg,
+      [
+        '-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-i', src,
+        '-filter_complex', buildFilterComplex(44100, 0.85, 0.35),
+        '-map', '[out]', '-c:a', 'libmp3lame', '-b:a', '320k',
+        '-progress', 'pipe:1', '-nostats', out
+      ],
+      { maxBuffer: 8 * 1024 * 1024 }
+    )
+
+    const seconds = stdout
+      .split(/\r?\n/)
+      .map(parseFfmpegProgress)
+      .filter((s): s is number => s !== null)
+
+    assert.ok(seconds.length > 0, 'ffmpeg emitted no parseable progress')
+    // Monotonic, and lands on the real output length rather than 1000x past it.
+    const expected = expectedDuration(6, 0.85)
+    const last = seconds[seconds.length - 1]!
+    assert.ok(
+      Math.abs(last - expected) < 0.25,
+      `final progress ${last}s should match the ${expected.toFixed(2)}s output`
+    )
+    for (let i = 1; i < seconds.length; i++) {
+      assert.ok(seconds[i]! >= seconds[i - 1]!, 'progress went backwards')
+    }
+  })
+})
+
+test('filter chain slows by resampling, never by atempo, and never recodes video', () => {
+  const chain = buildFilterComplex(44100, 0.85, 0.35)
+  // asetrate drops pitch with tempo; atempo would hold pitch, which is wrong here.
+  assert.match(chain, /asetrate=37485/)
+  assert.ok(!chain.includes('atempo'), 'atempo would preserve pitch')
+  assert.match(chain, /afir=/)
+  assert.match(chain, /amix=inputs=2:normalize=0/)
+  assert.match(chain, /alimiter/)
+
+  // reverb 0 must zero the wet bus outright, not merely quieten it.
+  assert.match(buildFilterComplex(44100, 0.9, 0), /volume=0\.0000/)
+  assert.match(buildFilterComplex(48000, 0.75, 1), /asetrate=36000/)
+})
+
+test(
+  'rendering a real file slows it, adds a measurable tail, and does not clip',
+  { timeout: 180_000 },
+  async () => {
+    await withTempDir(async (dir) => {
+      const src = path.join(dir, 'src.mp3')
+      const dry = path.join(dir, 'dry.mp3')
+      const wet = path.join(dir, 'wet.mp3')
+
+      // Plucks separated by silence, so a reverb tail is measurable in the gaps.
+      await run(ffmpeg, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'sine=f=440:d=6:r=44100',
+        '-af', "volume='if(lt(mod(t,2),0.15),1,0)':eval=frame,aformat=channel_layouts=stereo",
+        '-c:a', 'libmp3lame', '-b:a', '320k', src
+      ])
+
+      const render = async (out: string, reverb: number): Promise<void> => {
+        await run(ffmpeg, [
+          '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
+          '-filter_complex', buildFilterComplex(44100, 0.85, reverb),
+          '-map', '[out]', '-c:a', 'libmp3lame', '-b:a', '320k', out
+        ], { maxBuffer: 8 * 1024 * 1024 })
+      }
+      await render(dry, 0)
+      await render(wet, 0.35)
+
+      const durationOf = async (f: string): Promise<number> => {
+        const { stdout } = await run(ffprobe, [
+          '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f
+        ])
+        return Number(stdout.trim())
+      }
+
+      // 6s at 0.85 speed is 7.06s, plus the 3s tail.
+      const expected = expectedDuration(6, 0.85)
+      const actual = await durationOf(wet)
+      assert.ok(
+        Math.abs(actual - expected) < 0.25,
+        `expected ~${expected.toFixed(2)}s, got ${actual.toFixed(2)}s`
+      )
+
+      const measure = async (f: string, args: string[]): Promise<number> => {
+        // volumedetect reports on stderr at info level.
+        const { stderr } = await run(
+          ffmpeg,
+          ['-hide_banner', '-nostats', ...args, '-i', f, '-af', 'volumedetect', '-f', 'null', '-'],
+          { maxBuffer: 8 * 1024 * 1024 }
+        )
+        const m = /mean_volume:\s*(-?[\d.]+) dB[\s\S]*?max_volume:\s*(-?[\d.]+) dB/.exec(stderr)
+        assert.ok(m, `no volumedetect output for ${f}`)
+        return args.length ? Number(m![1]) : Number(m![2])
+      }
+
+      const gapArgs = ['-ss', '2.9', '-t', '0.4']
+      const dryGap = await measure(dry, gapArgs)
+      const wetGap = await measure(wet, gapArgs)
+
+      // The gap is silent without reverb and clearly ringing with it.
+      assert.ok(dryGap < -80, `dry gap should be silent, was ${dryGap} dB`)
+      assert.ok(
+        wetGap > dryGap + 20,
+        `reverb tail should lift the gap well above silence: dry ${dryGap} / wet ${wetGap} dB`
+      )
+
+      // And the limiter keeps the result under full scale.
+      const wetPeak = await measure(wet, [])
+      assert.ok(wetPeak < 0, `output should not clip, peak was ${wetPeak} dBFS`)
+    })
+  }
+)
+
+test('fx errors become something a human can act on', () => {
+  assert.match(mapFxError('No such file or directory', 1), /moved or renamed/)
+  assert.match(mapFxError('Invalid data found when processing input', 1), /not audio/)
+  assert.match(mapFxError('Permission denied', 1), /output folder/)
+  assert.match(mapFxError('', 137), /exit code 137/)
+})
 
 test('cleanupPartials only touches this download and never finished files', async () => {
   await withTempDir(async (dir) => {

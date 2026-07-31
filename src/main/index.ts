@@ -1,6 +1,7 @@
 import { BrowserWindow, app, shell } from 'electron'
 import path from 'node:path'
 import { ensureExecutable } from './binaries.ts'
+import { fxQueue } from './fxqueue.ts'
 import { bridgeQueueEvents, registerIpc } from './ipc.ts'
 import { log } from './logger.ts'
 import { buildMenu } from './menu.ts'
@@ -73,12 +74,12 @@ if (!app.requestSingleInstanceLock()) {
 let shuttingDown = false
 
 app.on('before-quit', (event) => {
-  if (shuttingDown || !queue.hasActive()) return
-  // Give the children a chance to die and their .part files a chance to go with them.
+  if (shuttingDown || (!queue.hasActive() && !fxQueue.hasActive())) return
+  // Give the children a chance to die and their part files a chance to go with them.
   event.preventDefault()
   shuttingDown = true
-  log('app', 'shutting down with active downloads')
-  void queue.shutdown().finally(() => app.quit())
+  log('app', 'shutting down with work in flight')
+  void Promise.all([queue.shutdown(), fxQueue.shutdown()]).finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {

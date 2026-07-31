@@ -18,11 +18,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "types": ["node"],
-    "baseUrl": ".",
-    "paths": {
-      "@shared/*": ["src/shared/*"]
-    }
+    "types": ["node"]
   },
   "include": [
     "src/**/*.ts",

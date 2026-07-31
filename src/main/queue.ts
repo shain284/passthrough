@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import type { DownloadItem, StartRequest } from '@shared/types'
+import type { DownloadItem, StartRequest } from '../shared/types.ts'
 import { runDownload } from './download.ts'
 import type { RunHandle } from './download.ts'
 import { isRemuxFailure, mapError } from './errors.ts'

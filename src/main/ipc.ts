@@ -1,8 +1,15 @@
 import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
-import type { BinaryVersions, Settings, StartRequest, UpdateResult } from '@shared/types'
-import { FORMAT_IDS } from '@shared/types'
+import type {
+  BinaryVersions,
+  FxRequest,
+  Settings,
+  StartRequest,
+  UpdateResult
+} from '../shared/types.ts'
+import { FORMAT_IDS, FX_EXTENSIONS } from '../shared/types.ts'
 import { ffmpegPath, ffmpegVersion, selfUpdate, ytDlpPath, ytDlpVersion } from './binaries.ts'
+import { fxQueue, isAcceptableAudioPath } from './fxqueue.ts'
 import { openLog } from './logger.ts'
 import { fetchMeta } from './metadata.ts'
 import { queue } from './queue.ts'
@@ -126,6 +133,59 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle('dl:openOutputDir', () => shell.openPath(getSettings().outputDir))
   ipcMain.handle('log:open', () => openLog())
+
+  /* -- Slowed + reverb ---------------------------------------------------- */
+
+  ipcMain.handle('fx:pick', async (): Promise<string[]> => {
+    const win = getWindow()
+    const opts = {
+      title: 'Choose audio files',
+      properties: ['openFile' as const, 'multiSelections' as const],
+      filters: [
+        { name: 'Audio', extensions: FX_EXTENSIONS.map((e) => e.slice(1)) },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts)
+    if (result.canceled) return []
+    return result.filePaths.filter(isAcceptableAudioPath)
+  })
+
+  ipcMain.handle('fx:list', () => fxQueue.list())
+
+  ipcMain.handle('fx:start', (_e, req: unknown) => {
+    if (typeof req !== 'object' || req === null) throw new Error('Bad request.')
+    const raw = req as Record<string, unknown>
+    if (!Array.isArray(raw.paths)) throw new Error('Bad request.')
+    if (raw.paths.length > 200) throw new Error('Too many files at once.')
+
+    // Paths can arrive from drag-and-drop, so they are re-checked here rather
+    // than trusted because the renderer sent them.
+    const paths = raw.paths.filter(isAcceptableAudioPath)
+    if (!paths.length) throw new Error('No supported audio files in that selection.')
+
+    const fxReq: FxRequest = {
+      paths,
+      speed: Number(raw.speed),
+      reverb: Number(raw.reverb)
+    }
+    return fxQueue.add(fxReq)
+  })
+
+  ipcMain.handle('fx:cancel', (_e, id: unknown) => fxQueue.cancel(asId(id)))
+  ipcMain.handle('fx:retry', (_e, id: unknown) => fxQueue.retry(asId(id)))
+  ipcMain.handle('fx:remove', (_e, id: unknown) => fxQueue.remove(asId(id)))
+
+  ipcMain.handle('fx:showInFolder', (_e, id: unknown) => {
+    const item = fxQueue.get(asId(id))
+    if (item?.filePath && fs.existsSync(item.filePath)) {
+      shell.showItemInFolder(item.filePath)
+      return
+    }
+    void shell.openPath(getSettings().outputDir)
+  })
 }
 
 /** Wires queue events to the renderer. Called once the window exists. */
@@ -136,10 +196,22 @@ export function bridgeQueueEvents(win: BrowserWindow): void {
   const onRemoved = (id: string): void => {
     if (!win.isDestroyed()) win.webContents.send('dl:removed', id)
   }
+  const onFxUpdate = (item: unknown): void => {
+    if (!win.isDestroyed()) win.webContents.send('fx:update', item)
+  }
+  const onFxRemoved = (id: string): void => {
+    if (!win.isDestroyed()) win.webContents.send('fx:removed', id)
+  }
+
   queue.on('update', onUpdate)
   queue.on('removed', onRemoved)
+  fxQueue.on('update', onFxUpdate)
+  fxQueue.on('removed', onFxRemoved)
+
   win.on('closed', () => {
     queue.off('update', onUpdate)
     queue.off('removed', onRemoved)
+    fxQueue.off('update', onFxUpdate)
+    fxQueue.off('removed', onFxRemoved)
   })
 }

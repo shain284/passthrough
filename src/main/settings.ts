@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Settings } from '@shared/types'
+import type { Settings } from '../shared/types.ts'
 
 let cached: Settings | null = null
 

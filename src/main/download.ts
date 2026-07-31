@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
-import type { FormatId } from '@shared/types'
+import type { FormatId } from '../shared/types.ts'
 import { ffmpegDir, jsRuntimeArgs, spawnEnv, ytDlpPath } from './binaries.ts'
 import { FILE_PREFIX, POSTPROCESS_PREFIX, PROGRESS_PREFIX, buildDownloadArgs } from './formats.ts'
 import { log } from './logger.ts'

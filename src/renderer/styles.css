@@ -80,6 +80,129 @@ button {
   gap: 10px;
 }
 
+/* Tabs -------------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  margin-top: -4px;
+}
+
+.tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 7px 14px;
+  color: var(--dim);
+  font-size: 13px;
+  font-weight: 550;
+  margin-bottom: -1px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* Drop zone --------------------------------------------------------------- */
+
+.dropzone {
+  border: 1.5px dashed #333a47;
+  border-radius: 8px;
+  background: var(--panel-2);
+  padding: 26px 14px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.dropzone:hover {
+  border-color: #465064;
+}
+
+.dropzone-active {
+  border-color: var(--accent);
+  background: #1b2740;
+}
+
+.dropzone-title {
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+/* Sliders ----------------------------------------------------------------- */
+
+.sliders {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.slider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.slider input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2f3a;
+  outline: none;
+  cursor: pointer;
+}
+
+.slider input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+  cursor: pointer;
+}
+
+.slider input[type='range']:hover::-webkit-slider-thumb {
+  background: #6a9dff;
+}
+
+/* Audio row glyph --------------------------------------------------------- */
+
+.fx-glyph {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #1b2740;
+  color: var(--accent);
+  font-size: 20px;
+}
+
+.row-rendering .fx-glyph {
+  background: #1f2d48;
+}
+
 /* Panel ------------------------------------------------------------------- */
 
 .panel {

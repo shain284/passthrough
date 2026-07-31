@@ -1,4 +1,4 @@
-import type { FormatId } from '@shared/types'
+import type { FormatId } from '../shared/types.ts'
 
 export const PROGRESS_PREFIX = 'PROG|'
 export const POSTPROCESS_PREFIX = 'PPROG|'

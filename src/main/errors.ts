@@ -1,4 +1,4 @@
-import type { DownloadError } from '@shared/types'
+import type { DownloadError } from '../shared/types.ts'
 
 interface Rule {
   test: RegExp
