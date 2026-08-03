@@ -2,19 +2,19 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { FxItem, FxRequest } from '../shared/types.ts'
-import { FX_EXTENSIONS } from '../shared/types.ts'
-import { clampReverb, clampSpeed, expectedDuration, mapFxError } from './audiofx.ts'
-import { probeAudio, runFx } from './fxrun.ts'
+import type { StretchItem, StretchRequest } from '../shared/types.ts'
+import { ASPECT_IDS, FIT_MODE_IDS, STRETCH_DEFAULTS, VIDEO_EXTENSIONS } from '../shared/types.ts'
 import { MediaQueue } from './mediaqueue.ts'
 import { uniqueOutputPath } from './outputs.ts'
+import { isAudioCopied, mapStretchError, outputSize } from './stretch.ts'
+import { probeVideo, runStretch } from './stretchrun.ts'
 import { log } from './logger.ts'
 import { ensureOutputDir } from './settings.ts'
 
-/** Rejects anything that is not a readable file with an audio extension. */
-export function isAcceptableAudioPath(p: unknown): p is string {
+/** Rejects anything that is not a readable file with a video extension. */
+export function isAcceptableVideoPath(p: unknown): p is string {
   if (typeof p !== 'string' || !p.trim() || p.length > 4096) return false
-  if (!FX_EXTENSIONS.includes(path.extname(p).toLowerCase())) return false
+  if (!VIDEO_EXTENSIONS.includes(path.extname(p).toLowerCase())) return false
   try {
     return fs.statSync(p).isFile()
   } catch {
@@ -22,10 +22,10 @@ export function isAcceptableAudioPath(p: unknown): p is string {
   }
 }
 
-class FxQueue extends MediaQueue<FxItem> {
+class StretchQueue extends MediaQueue<StretchItem> {
   protected readonly maxConcurrent = 2
 
-  protected retryPatch(): Partial<FxItem> {
+  protected retryPatch(): Partial<StretchItem> {
     return {
       error: undefined,
       renderedSeconds: undefined,
@@ -33,21 +33,21 @@ class FxQueue extends MediaQueue<FxItem> {
     }
   }
 
-  add(req: FxRequest): FxItem[] {
-    const speed = clampSpeed(req.speed)
-    const reverb = clampReverb(req.reverb)
+  add(req: StretchRequest): StretchItem[] {
+    const aspect = ASPECT_IDS.includes(req.aspect) ? req.aspect : STRETCH_DEFAULTS.aspect
+    const mode = FIT_MODE_IDS.includes(req.mode) ? req.mode : STRETCH_DEFAULTS.mode
 
-    const created: FxItem[] = []
+    const created: StretchItem[] = []
     for (const inputPath of req.paths) {
-      if (!isAcceptableAudioPath(inputPath)) continue
+      if (!isAcceptableVideoPath(inputPath)) continue
 
-      const item: FxItem = {
+      const item: StretchItem = {
         id: randomUUID(),
         inputPath,
         fileName: path.basename(inputPath),
         status: 'queued',
-        speed,
-        reverb,
+        aspect,
+        mode,
         createdAt: Date.now()
       }
       this.append(item)
@@ -60,20 +60,25 @@ class FxQueue extends MediaQueue<FxItem> {
     return created
   }
 
-  /** Length is needed before the bar can mean anything. */
+  /** Dimensions and length up front, so the row is informative before it runs. */
   private async prefill(id: string): Promise<void> {
     const item = this.items.get(id)
     if (!item) return
     try {
-      const info = await probeAudio(item.inputPath)
+      const info = await probeVideo(item.inputPath)
       const current = this.items.get(id)
       if (!current) return
+      const out = outputSize({ width: info.width, height: info.height }, current.aspect)
       this.patch(id, {
-        durationIn: info.durationSeconds,
-        durationOut: expectedDuration(info.durationSeconds, current.speed)
+        sourceWidth: info.width,
+        sourceHeight: info.height,
+        outputWidth: out.width,
+        outputHeight: out.height,
+        durationSeconds: info.durationSeconds,
+        audioCopied: isAudioCopied(info.audioCodec)
       })
     } catch (e) {
-      log('fx', `probe failed for ${item.inputPath}: ${String(e)}`)
+      log('stretch', `probe failed for ${item.inputPath}: ${String(e)}`)
     }
   }
 
@@ -94,13 +99,13 @@ class FxQueue extends MediaQueue<FxItem> {
       return
     }
 
-    let info: Awaited<ReturnType<typeof probeAudio>>
+    let info: Awaited<ReturnType<typeof probeVideo>>
     try {
-      info = await probeAudio(item.inputPath)
+      info = await probeVideo(item.inputPath)
     } catch (e) {
       this.patch(id, {
         status: 'error',
-        error: e instanceof Error ? e.message : 'Could not read that audio file.'
+        error: e instanceof Error ? e.message : 'Could not read that video file.'
       })
       this.pump()
       return
@@ -108,26 +113,32 @@ class FxQueue extends MediaQueue<FxItem> {
 
     if (this.items.get(id)?.status !== 'rendering') return // canceled while probing
 
+    const out = outputSize({ width: info.width, height: info.height }, item.aspect)
     const output = await uniqueOutputPath(
       outputDir,
       path.basename(item.inputPath, path.extname(item.inputPath)),
-      '(slowed + reverb)',
-      '.mp3'
+      `(${item.aspect.replace(':', 'x')})`,
+      '.mp4'
     )
 
     if (this.items.get(id)?.status !== 'rendering') return
 
     this.patch(id, {
-      durationIn: info.durationSeconds,
-      durationOut: expectedDuration(info.durationSeconds, item.speed)
+      sourceWidth: info.width,
+      sourceHeight: info.height,
+      outputWidth: out.width,
+      outputHeight: out.height,
+      durationSeconds: info.durationSeconds,
+      audioCopied: isAudioCopied(info.audioCodec)
     })
 
-    const handle = runFx({
+    const handle = runStretch({
       input: item.inputPath,
       output,
-      sampleRate: info.sampleRate,
-      speed: item.speed,
-      reverb: item.reverb,
+      source: { width: info.width, height: info.height },
+      aspect: item.aspect,
+      mode: item.mode,
+      audioCodec: info.audioCodec,
       onProgress: (seconds) => {
         if (this.items.get(id)?.status !== 'rendering') return
         this.patch(id, { renderedSeconds: seconds })
@@ -147,7 +158,7 @@ class FxQueue extends MediaQueue<FxItem> {
 
   private async finish(
     id: string,
-    result: Awaited<ReturnType<typeof runFx>['result']>,
+    result: Awaited<ReturnType<typeof runStretch>['result']>,
     output: string
   ): Promise<void> {
     this.clearJob(id)
@@ -174,7 +185,7 @@ class FxQueue extends MediaQueue<FxItem> {
       this.patch(id, {
         status: 'done',
         filePath: output,
-        renderedSeconds: item?.durationOut
+        renderedSeconds: item?.durationSeconds
       })
       this.pump()
       return
@@ -183,11 +194,11 @@ class FxQueue extends MediaQueue<FxItem> {
     await removePartial()
     this.patch(id, {
       status: 'error',
-      error: mapFxError(result.stderr, result.code),
+      error: mapStretchError(result.stderr, result.code),
       renderedSeconds: undefined
     })
     this.pump()
   }
 }
 
-export const fxQueue = new FxQueue()
+export const stretchQueue = new StretchQueue()

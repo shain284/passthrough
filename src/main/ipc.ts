@@ -4,12 +4,14 @@ import type {
   BinaryVersions,
   FxRequest,
   Settings,
+  StretchRequest,
   StartRequest,
   UpdateResult
 } from '../shared/types.ts'
-import { FORMAT_IDS, FX_EXTENSIONS } from '../shared/types.ts'
+import { FORMAT_IDS, FX_EXTENSIONS, VIDEO_EXTENSIONS } from '../shared/types.ts'
 import { ffmpegPath, ffmpegVersion, selfUpdate, ytDlpPath, ytDlpVersion } from './binaries.ts'
 import { fxQueue, isAcceptableAudioPath } from './fxqueue.ts'
+import { isAcceptableVideoPath, stretchQueue } from './stretchqueue.ts'
 import { openLog } from './logger.ts'
 import { fetchMeta } from './metadata.ts'
 import { queue } from './queue.ts'
@@ -186,6 +188,59 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     }
     void shell.openPath(getSettings().outputDir)
   })
+
+  /* -- Aspect ratio stretcher --------------------------------------------- */
+
+  ipcMain.handle('stretch:pick', async (): Promise<string[]> => {
+    const win = getWindow()
+    const opts = {
+      title: 'Choose video files',
+      properties: ['openFile' as const, 'multiSelections' as const],
+      filters: [
+        { name: 'Video', extensions: VIDEO_EXTENSIONS.map((e) => e.slice(1)) },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts)
+    if (result.canceled) return []
+    return result.filePaths.filter(isAcceptableVideoPath)
+  })
+
+  ipcMain.handle('stretch:list', () => stretchQueue.list())
+
+  ipcMain.handle('stretch:start', (_e, req: unknown) => {
+    if (typeof req !== 'object' || req === null) throw new Error('Bad request.')
+    const raw = req as Record<string, unknown>
+    if (!Array.isArray(raw.paths)) throw new Error('Bad request.')
+    if (raw.paths.length > 200) throw new Error('Too many files at once.')
+
+    // Paths can arrive from drag-and-drop, so they are re-checked here rather
+    // than trusted because the renderer sent them.
+    const paths = raw.paths.filter(isAcceptableVideoPath)
+    if (!paths.length) throw new Error('No supported video files in that selection.')
+
+    const stretchReq: StretchRequest = {
+      paths,
+      aspect: raw.aspect as StretchRequest['aspect'],
+      mode: raw.mode as StretchRequest['mode']
+    }
+    return stretchQueue.add(stretchReq)
+  })
+
+  ipcMain.handle('stretch:cancel', (_e, id: unknown) => stretchQueue.cancel(asId(id)))
+  ipcMain.handle('stretch:retry', (_e, id: unknown) => stretchQueue.retry(asId(id)))
+  ipcMain.handle('stretch:remove', (_e, id: unknown) => stretchQueue.remove(asId(id)))
+
+  ipcMain.handle('stretch:showInFolder', (_e, id: unknown) => {
+    const item = stretchQueue.get(asId(id))
+    if (item?.filePath && fs.existsSync(item.filePath)) {
+      shell.showItemInFolder(item.filePath)
+      return
+    }
+    void shell.openPath(getSettings().outputDir)
+  })
 }
 
 /** Wires queue events to the renderer. Called once the window exists. */
@@ -203,15 +258,26 @@ export function bridgeQueueEvents(win: BrowserWindow): void {
     if (!win.isDestroyed()) win.webContents.send('fx:removed', id)
   }
 
+  const onStretchUpdate = (item: unknown): void => {
+    if (!win.isDestroyed()) win.webContents.send('stretch:update', item)
+  }
+  const onStretchRemoved = (id: string): void => {
+    if (!win.isDestroyed()) win.webContents.send('stretch:removed', id)
+  }
+
   queue.on('update', onUpdate)
   queue.on('removed', onRemoved)
   fxQueue.on('update', onFxUpdate)
   fxQueue.on('removed', onFxRemoved)
+  stretchQueue.on('update', onStretchUpdate)
+  stretchQueue.on('removed', onStretchRemoved)
 
   win.on('closed', () => {
     queue.off('update', onUpdate)
     queue.off('removed', onRemoved)
     fxQueue.off('update', onFxUpdate)
     fxQueue.off('removed', onFxRemoved)
+    stretchQueue.off('update', onStretchUpdate)
+    stretchQueue.off('removed', onStretchRemoved)
   })
 }

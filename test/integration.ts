@@ -24,7 +24,17 @@ import {
   mapFxError,
   parseFfmpegProgress
 } from '../src/main/audiofx.ts'
+import { ASPECT_IDS, FIT_MODE_IDS } from '../src/shared/types.ts'
 import { buildDownloadArgs, FILE_PREFIX, POSTPROCESS_PREFIX } from '../src/main/formats.ts'
+import { MediaQueue } from '../src/main/mediaqueue.ts'
+import {
+  audioArgs,
+  buildStretchArgs,
+  buildVideoFilter,
+  isAudioCopied,
+  mapStretchError,
+  outputSize
+} from '../src/main/stretch.ts'
 import { parseProgressLine } from '../src/main/progress.ts'
 import { cleanupPartials, killTree } from '../src/main/proc.ts'
 import { isRemuxFailure, mapError } from '../src/main/errors.ts'
@@ -385,6 +395,262 @@ test('fx errors become something a human can act on', () => {
   assert.match(mapFxError('Invalid data found when processing input', 1), /not audio/)
   assert.match(mapFxError('Permission denied', 1), /output folder/)
   assert.match(mapFxError('', 137), /exit code 137/)
+})
+
+/* -- Aspect ratio stretcher ----------------------------------------------- */
+
+test('output size keeps the pixel count and lands on the expected frames', () => {
+  // 1080p to a phone is exactly 1080x1920 — no invented detail, no downscale.
+  assert.deepEqual(outputSize({ width: 1920, height: 1080 }, '9:16'), {
+    width: 1080,
+    height: 1920
+  })
+  assert.deepEqual(outputSize({ width: 3840, height: 2160 }, '9:16'), {
+    width: 2160,
+    height: 3840
+  })
+  // Same aspect in and out must be a no-op, not a resample.
+  assert.deepEqual(outputSize({ width: 1920, height: 1080 }, '16:9'), {
+    width: 1920,
+    height: 1080
+  })
+  assert.deepEqual(outputSize({ width: 1920, height: 1080 }, '1:1'), {
+    width: 1440,
+    height: 1440
+  })
+
+  // H.264 in yuv420p needs both dimensions even, whatever the source.
+  for (const src of [
+    { width: 1919, height: 1079 },
+    { width: 641, height: 361 },
+    { width: 100, height: 3 }
+  ]) {
+    for (const aspect of ASPECT_IDS) {
+      const out = outputSize(src, aspect)
+      assert.equal(out.width % 2, 0, `${src.width}x${src.height} ${aspect} width odd`)
+      assert.equal(out.height % 2, 0, `${src.width}x${src.height} ${aspect} height odd`)
+      assert.ok(out.width >= 2 && out.height >= 2)
+    }
+  }
+})
+
+test('each fit mode does what its name says', () => {
+  const out = { width: 1080, height: 1920 }
+
+  // Stretch distorts: a plain scale with no aspect preservation at all.
+  const stretch = buildVideoFilter('stretch', out)
+  assert.match(stretch, /scale=1080:1920:flags=lanczos/)
+  assert.ok(!stretch.includes('force_original_aspect_ratio'))
+  assert.ok(!stretch.includes('crop='))
+
+  // Fill covers then trims the overflow.
+  const crop = buildVideoFilter('crop', out)
+  assert.match(crop, /force_original_aspect_ratio=increase/)
+  assert.match(crop, /crop=1080:1920/)
+
+  // Fit shrinks to contain, then fills the gap with black.
+  const pad = buildVideoFilter('pad', out)
+  assert.match(pad, /force_original_aspect_ratio=decrease/)
+  assert.match(pad, /pad=1080:1920/)
+
+  // Blur needs both: a cover for the backdrop and a contain for the sharp copy.
+  const blur = buildVideoFilter('blur', out)
+  assert.match(blur, /force_original_aspect_ratio=increase/)
+  assert.match(blur, /force_original_aspect_ratio=decrease/)
+  assert.match(blur, /gblur=sigma=\d+/)
+  assert.match(blur, /overlay=\(W-w\)\/2:\(H-h\)\/2/)
+
+  // Every mode must clear SAR, or a player re-stretches what we just framed.
+  for (const mode of FIT_MODE_IDS) {
+    assert.match(buildVideoFilter(mode, out), /setsar=1/, `${mode} must set SAR`)
+    assert.match(buildVideoFilter(mode, out), /\[vout\]$/, `${mode} must end in [vout]`)
+  }
+})
+
+test('audio is copied whenever MP4 can hold it', () => {
+  for (const codec of ['aac', 'mp3', 'AAC', 'alac', 'ac3']) {
+    assert.deepEqual(audioArgs(codec), ['-c:a', 'copy'], `${codec} should be copied`)
+    assert.equal(isAudioCopied(codec), true)
+  }
+  // Opus and vorbis are not safely muxable here, so they get converted.
+  for (const codec of ['opus', 'vorbis', 'pcm_s16le']) {
+    assert.deepEqual(audioArgs(codec), ['-c:a', 'aac', '-b:a', '192k'])
+    assert.equal(isAudioCopied(codec), false)
+  }
+  assert.deepEqual(audioArgs(null), [])
+  assert.equal(isAudioCopied(null), false)
+})
+
+test('stretch args never downscale-by-default and always re-encode video once', () => {
+  const args = buildStretchArgs({
+    input: '/in.mp4',
+    output: '/out.mp4',
+    source: { width: 1920, height: 1080 },
+    aspect: '9:16',
+    mode: 'crop',
+    audioCodec: 'aac'
+  })
+  assert.ok(args.includes('libx264'))
+  assert.ok(args.includes('-crf') && args.includes('17'))
+  assert.ok(args.includes('yuv420p'))
+  assert.ok(args.includes('+faststart'))
+  // Audio copied, so only the video is touched.
+  assert.ok(args.join(' ').includes('-c:a copy'))
+  // A silent source must not fail the render.
+  assert.ok(args.join(' ').includes('-map 0:a:0?'))
+  assert.equal(args.at(-1), '/out.mp4')
+})
+
+test('stretch errors become something a human can act on', () => {
+  assert.match(mapStretchError('No such file or directory', 1), /moved or renamed/)
+  assert.match(mapStretchError('moov atom not found', 1), /not video/)
+  assert.match(mapStretchError('No space left on device', 1), /out of space/)
+  assert.match(mapStretchError('', 137), /exit code 137/)
+})
+
+test(
+  'reframing a real video hits the target shape, keeps SAR square and copies the audio',
+  { timeout: 300_000 },
+  async () => {
+    await withTempDir(async (dir) => {
+      const src = path.join(dir, 'src.mp4')
+      await run(ffmpeg, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=30:duration=3',
+        '-f', 'lavfi', '-i', 'sine=f=440:r=48000:d=3',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '128k', '-shortest', src
+      ])
+
+      const audioMd5 = async (f: string): Promise<string> => {
+        const { stdout } = await run(ffmpeg, [
+          '-v', 'error', '-i', f, '-map', '0:a:0', '-c', 'copy', '-f', 'md5', '-'
+        ])
+        return stdout.trim()
+      }
+      const sourceAudio = await audioMd5(src)
+
+      for (const mode of FIT_MODE_IDS) {
+        const out = path.join(dir, `${mode}.mp4`)
+        await run(
+          ffmpeg,
+          buildStretchArgs({
+            input: src,
+            output: out,
+            source: { width: 1920, height: 1080 },
+            aspect: '9:16',
+            mode,
+            audioCodec: 'aac'
+          }),
+          { maxBuffer: 16 * 1024 * 1024 }
+        )
+
+        const { stdout } = await run(ffprobe, [
+          '-v', 'error', '-select_streams', 'v:0',
+          '-show_entries', 'stream=width,height,sample_aspect_ratio,pix_fmt',
+          '-of', 'csv=p=0', out
+        ])
+        const [w, h, sar, fmt] = stdout.trim().split(',')
+        assert.equal(w, '1080', `${mode} width`)
+        assert.equal(h, '1920', `${mode} height`)
+        // Anything but 1:1 means the player would stretch it again on playback.
+        assert.ok(sar === '1:1' || sar === 'N/A', `${mode} SAR was ${sar}`)
+        assert.equal(fmt, 'yuv420p', `${mode} pixel format`)
+
+        // The whole point of copying the audio: it must survive bit for bit.
+        assert.equal(await audioMd5(out), sourceAudio, `${mode} altered the audio`)
+      }
+    })
+  }
+)
+
+/* -- Render queue scheduling ---------------------------------------------- */
+
+test('the render queue never runs more than its limit, even while probing', async () => {
+  // The bug this pins: start() awaits a probe before the child process exists,
+  // so a queue that counts spawned children instead of claimed rows will launch
+  // every queued row at once.
+  interface Row {
+    id: string
+    status: 'queued' | 'rendering' | 'done' | 'error' | 'canceled'
+  }
+
+  let peak = 0
+  let running = 0
+  const finishers: (() => void)[] = []
+
+  class TestQueue extends MediaQueue<Row> {
+    protected readonly maxConcurrent = 2
+    protected retryPatch(): Partial<Row> {
+      return {}
+    }
+    protected async startItem(id: string): Promise<void> {
+      this.patch(id, { status: 'rendering' })
+      // Stand-in for probeAudio/probeVideo: a real await before any child exists.
+      await new Promise((r) => setTimeout(r, 5))
+      if (this.get(id)?.status !== 'rendering') return
+      running++
+      peak = Math.max(peak, running)
+      this.registerJob(id, { kill: () => undefined, cleanup: async () => undefined })
+      finishers.push(() => {
+        running--
+        this.clearJob(id)
+        this.patch(id, { status: 'done' })
+        this.pump()
+      })
+    }
+    seed(n: number): void {
+      for (let i = 0; i < n; i++) this.append({ id: `row-${i}`, status: 'queued' })
+      this.pump()
+    }
+  }
+
+  const q = new TestQueue()
+  q.seed(8)
+
+  // Let every pending start() settle, then drain, repeatedly.
+  for (let guard = 0; guard < 50 && q.list().some((r) => r.status !== 'done'); guard++) {
+    await new Promise((r) => setTimeout(r, 15))
+    while (finishers.length) finishers.shift()!()
+  }
+
+  assert.equal(peak, 2, `expected at most 2 concurrent renders, peaked at ${peak}`)
+  assert.equal(q.list().filter((r) => r.status === 'done').length, 8)
+})
+
+test('the render queue cancels a row that is still probing', async () => {
+  interface Row {
+    id: string
+    status: 'queued' | 'rendering' | 'done' | 'error' | 'canceled'
+  }
+  let spawned = 0
+
+  class TestQueue extends MediaQueue<Row> {
+    protected readonly maxConcurrent = 2
+    protected retryPatch(): Partial<Row> {
+      return {}
+    }
+    protected async startItem(id: string): Promise<void> {
+      this.patch(id, { status: 'rendering' })
+      await new Promise((r) => setTimeout(r, 20))
+      // Cancelled mid-probe: nothing should be launched.
+      if (this.get(id)?.status !== 'rendering') return
+      spawned++
+      this.registerJob(id, { kill: () => undefined, cleanup: async () => undefined })
+    }
+    seed(): void {
+      this.append({ id: 'a', status: 'queued' })
+      this.pump()
+    }
+  }
+
+  const q = new TestQueue()
+  q.seed()
+  q.cancel('a')
+  assert.equal(q.get('a')?.status, 'canceled')
+  await new Promise((r) => setTimeout(r, 60))
+  assert.equal(spawned, 0, 'a cancelled row must not spawn a process')
+  assert.equal(q.get('a')?.status, 'canceled')
 })
 
 test('cleanupPartials only touches this download and never finished files', async () => {

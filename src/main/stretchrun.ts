@@ -1,87 +1,88 @@
 import { execFile, spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { ffmpegPath, ffprobePath, spawnEnv } from './binaries.ts'
-import { buildFxArgs } from './audiofx.ts'
 import { parseFfmpegProgress } from './ffprogress.ts'
+import { buildStretchArgs } from './stretch.ts'
+import type { StretchArgsOptions } from './stretch.ts'
 import { log } from './logger.ts'
 import { killTree } from './proc.ts'
 
-/**
- * Everything in the slowed + reverb path that actually spawns a process.
- * audiofx.ts stays free of Electron so the filter and parsing logic can be
- * exercised directly by the tests, the same way formats.ts is.
- */
-
-export interface AudioInfo {
+export interface VideoInfo {
+  width: number
+  height: number
   durationSeconds: number
-  sampleRate: number
+  audioCodec: string | null
 }
 
-export function probeAudio(file: string): Promise<AudioInfo> {
+export function probeVideo(file: string): Promise<VideoInfo> {
   return new Promise((resolve, reject) => {
     execFile(
       ffprobePath,
       [
         '-v', 'error',
-        '-select_streams', 'a:0',
-        '-show_entries', 'stream=sample_rate',
+        '-show_entries', 'stream=index,codec_type,codec_name,width,height',
         '-show_entries', 'format=duration',
         '-of', 'json',
         '--', file
       ],
-      { timeout: 30000, windowsHide: true, env: spawnEnv(), maxBuffer: 1024 * 1024 },
+      { timeout: 30000, windowsHide: true, env: spawnEnv(), maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
-          reject(new Error(stderr?.trim() || 'Could not read that audio file.'))
+          reject(new Error(stderr?.trim() || 'Could not read that video file.'))
           return
         }
         try {
           const json = JSON.parse(stdout) as {
-            streams?: { sample_rate?: string }[]
+            streams?: {
+              codec_type?: string
+              codec_name?: string
+              width?: number
+              height?: number
+            }[]
             format?: { duration?: string }
           }
-          const stream = json.streams?.[0]
-          if (!stream) {
-            reject(new Error('That file has no audio stream.'))
+          const streams = json.streams ?? []
+          const video = streams.find((s) => s.codec_type === 'video')
+          const audio = streams.find((s) => s.codec_type === 'audio')
+
+          if (!video || !video.width || !video.height) {
+            reject(new Error('That file has no video stream.'))
             return
           }
-          const sampleRate = Number(stream.sample_rate)
-          const durationSeconds = Number(json.format?.duration)
+
+          const duration = Number(json.format?.duration)
           resolve({
-            sampleRate: Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : 44100,
-            durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0
+            width: video.width,
+            height: video.height,
+            durationSeconds: Number.isFinite(duration) ? duration : 0,
+            audioCodec: audio?.codec_name ?? null
           })
         } catch {
-          reject(new Error('Could not read that audio file.'))
+          reject(new Error('Could not read that video file.'))
         }
       }
     )
   })
 }
 
-export interface FxRunOptions {
-  input: string
-  output: string
-  sampleRate: number
-  speed: number
-  reverb: number
+export interface StretchRunOptions extends StretchArgsOptions {
   onProgress(outSeconds: number): void
 }
 
-export interface FxRunResult {
+export interface StretchRunResult {
   code: number | null
   killed: boolean
   stderr: string
 }
 
-export interface FxRunHandle {
-  result: Promise<FxRunResult>
+export interface StretchRunHandle {
+  result: Promise<StretchRunResult>
   kill(): void
 }
 
-export function runFx(opts: FxRunOptions): FxRunHandle {
-  const args = buildFxArgs(opts)
-  log('fx-spawn', `${ffmpegPath} ${args.join(' ')}`)
+export function runStretch(opts: StretchRunOptions): StretchRunHandle {
+  const args = buildStretchArgs(opts)
+  log('stretch-spawn', `${ffmpegPath} ${args.join(' ')}`)
 
   const child: ChildProcess = spawn(ffmpegPath, args, {
     windowsHide: true,
@@ -103,7 +104,7 @@ export function runFx(opts: FxRunOptions): FxRunHandle {
       const seconds = parseFfmpegProgress(line)
       if (seconds === null) continue
       const now = Date.now()
-      if (now - lastEmit < 100) continue // ~10 updates/sec, same as downloads
+      if (now - lastEmit < 100) continue // ~10 updates/sec, same as the other tabs
       lastEmit = now
       opts.onProgress(seconds)
     }
@@ -117,14 +118,14 @@ export function runFx(opts: FxRunOptions): FxRunHandle {
     for (const line of lines) {
       if (!line.trim()) continue
       stderr += `${line}\n`
-      log('fx-stderr', line)
+      log('stretch-stderr', line)
     }
   })
 
-  const result = new Promise<FxRunResult>((resolve) => {
+  const result = new Promise<StretchRunResult>((resolve) => {
     child.on('error', (err) => {
       stderr += `${err.message}\n`
-      log('fx-spawn-error', err.message)
+      log('stretch-spawn-error', err.message)
       resolve({ code: null, killed, stderr })
     })
     child.on('close', (code) => {

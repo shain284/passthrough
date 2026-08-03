@@ -203,6 +203,29 @@ button {
   background: #1f2d48;
 }
 
+/* Aspect row glyph — a proxy of the target shape ------------------------- */
+
+.aspect-glyph {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #1b2740;
+}
+
+.aspect-box {
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+}
+
+/* Two rows of preset buttons stack tighter than one. */
+.panel .formats + .formats {
+  margin-top: -4px;
+}
+
 /* Panel ------------------------------------------------------------------- */
 
 .panel {

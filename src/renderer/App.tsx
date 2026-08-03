@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import type { BinaryVersions, Settings } from '../shared/types.ts'
 import { DownloadPanel } from './DownloadPanel.tsx'
 import { FxPanel } from './FxPanel.tsx'
+import { StretchPanel } from './StretchPanel.tsx'
 
-type Tab = 'download' | 'fx'
+type Tab = 'download' | 'fx' | 'stretch'
 
 const TABS: { id: Tab; label: string; tagline: string }[] = [
   { id: 'download', label: 'Download', tagline: 'no re-encoding, ever' },
-  { id: 'fx', label: 'Slowed + Reverb', tagline: 'renders a new file' }
+  { id: 'fx', label: 'Slowed + Reverb', tagline: 'renders a new file' },
+  { id: 'stretch', label: 'Stretch', tagline: 'reframes, re-encodes once' }
 ]
 
 export function App(): React.JSX.Element {
@@ -103,8 +105,10 @@ export function App(): React.JSX.Element {
           onToast={setToast}
           onCheckUpdates={() => void checkUpdates()}
         />
-      ) : (
+      ) : tab === 'fx' ? (
         <FxPanel settings={settings} onSettings={setSettings} onToast={setToast} />
+      ) : (
+        <StretchPanel settings={settings} onSettings={setSettings} onToast={setToast} />
       )}
     </div>
   )

@@ -108,6 +108,70 @@ export interface FxRequest {
   reverb: number
 }
 
+/* -- Aspect ratio stretcher ----------------------------------------------- */
+
+export type AspectId = '9:16' | '1:1' | '4:5' | '16:9'
+
+export const ASPECTS: Record<AspectId, { w: number; h: number; label: string; sub: string }> = {
+  '9:16': { w: 9, h: 16, label: '9:16', sub: 'phone, Reels, Shorts' },
+  '1:1': { w: 1, h: 1, label: '1:1', sub: 'square feed' },
+  '4:5': { w: 4, h: 5, label: '4:5', sub: 'portrait feed' },
+  '16:9': { w: 16, h: 9, label: '16:9', sub: 'TV, desktop' }
+}
+
+export const ASPECT_IDS: AspectId[] = ['9:16', '1:1', '4:5', '16:9']
+
+/** How the source frame is made to fit the new aspect ratio. */
+export type FitMode = 'stretch' | 'crop' | 'pad' | 'blur'
+
+export const FIT_MODES: { id: FitMode; label: string; sub: string }[] = [
+  { id: 'stretch', label: 'Stretch', sub: 'fills, distorts' },
+  { id: 'crop', label: 'Fill', sub: 'crops the sides' },
+  { id: 'pad', label: 'Fit', sub: 'black bars' },
+  { id: 'blur', label: 'Blur', sub: 'blurred backdrop' }
+]
+
+export const FIT_MODE_IDS: FitMode[] = ['stretch', 'crop', 'pad', 'blur']
+
+export const STRETCH_DEFAULTS = { aspect: '9:16' as AspectId, mode: 'stretch' as FitMode }
+
+/** Containers the stretch tab will accept. Output is always MP4. */
+export const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.mkv', '.webm', '.m4v', '.avi']
+
+export type StretchStatus = 'queued' | 'rendering' | 'done' | 'error' | 'canceled'
+
+export interface StretchItem {
+  id: string
+  inputPath: string
+  fileName: string
+  status: StretchStatus
+
+  aspect: AspectId
+  mode: FitMode
+
+  /** Source dimensions, from ffprobe. */
+  sourceWidth?: number
+  sourceHeight?: number
+  /** Computed output dimensions. */
+  outputWidth?: number
+  outputHeight?: number
+  /** True when the audio was stream-copied rather than re-encoded. */
+  audioCopied?: boolean
+
+  durationSeconds?: number
+  renderedSeconds?: number
+
+  filePath?: string
+  error?: string
+  createdAt: number
+}
+
+export interface StretchRequest {
+  paths: string[]
+  aspect: AspectId
+  mode: FitMode
+}
+
 export interface BinaryVersions {
   ytDlp: string | null
   ffmpeg: string | null
@@ -166,6 +230,17 @@ export interface RendererApi {
   showFxInFolder(id: string): Promise<void>
   onFxUpdate(cb: (item: FxItem) => void): () => void
   onFxRemoved(cb: (id: string) => void): () => void
+
+  /* Aspect ratio stretcher */
+  pickVideoFiles(): Promise<string[]>
+  listStretch(): Promise<StretchItem[]>
+  startStretch(req: StretchRequest): Promise<StretchItem[]>
+  cancelStretch(id: string): Promise<void>
+  retryStretch(id: string): Promise<void>
+  removeStretch(id: string): Promise<void>
+  showStretchInFolder(id: string): Promise<void>
+  onStretchUpdate(cb: (item: StretchItem) => void): () => void
+  onStretchRemoved(cb: (id: string) => void): () => void
 
   /** Electron 33 removed File.path; drag-and-drop needs webUtils instead. */
   getPathForFile(file: File): string

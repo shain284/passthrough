@@ -8,6 +8,8 @@ import type {
   RendererApi,
   Settings,
   StartRequest,
+  StretchItem,
+  StretchRequest,
   UpdateResult,
   VideoMeta
 } from '../shared/types.ts'
@@ -60,6 +62,18 @@ const api: RendererApi = {
   showFxInFolder: (id: string) => ipcRenderer.invoke('fx:showInFolder', id) as Promise<void>,
   onFxUpdate: (cb) => subscribe<FxItem>('fx:update', cb),
   onFxRemoved: (cb) => subscribe<string>('fx:removed', cb),
+
+  pickVideoFiles: () => ipcRenderer.invoke('stretch:pick') as Promise<string[]>,
+  listStretch: () => ipcRenderer.invoke('stretch:list') as Promise<StretchItem[]>,
+  startStretch: (req: StretchRequest) =>
+    ipcRenderer.invoke('stretch:start', req) as Promise<StretchItem[]>,
+  cancelStretch: (id: string) => ipcRenderer.invoke('stretch:cancel', id) as Promise<void>,
+  retryStretch: (id: string) => ipcRenderer.invoke('stretch:retry', id) as Promise<void>,
+  removeStretch: (id: string) => ipcRenderer.invoke('stretch:remove', id) as Promise<void>,
+  showStretchInFolder: (id: string) =>
+    ipcRenderer.invoke('stretch:showInFolder', id) as Promise<void>,
+  onStretchUpdate: (cb) => subscribe<StretchItem>('stretch:update', cb),
+  onStretchRemoved: (cb) => subscribe<string>('stretch:removed', cb),
 
   // Electron 33 dropped File.path; this is the supported replacement and is the
   // only way a dropped file's real path reaches the main process.
