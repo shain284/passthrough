@@ -1,5 +1,9 @@
 import type { AspectId, FitMode } from '../shared/types.ts'
 import { ASPECTS } from '../shared/types.ts'
+import { audioArgs, isAudioCopied } from './mp4audio.ts'
+
+// Re-exported so the stretch tab's callers and tests keep one import site.
+export { audioArgs, isAudioCopied }
 
 /**
  * Reframing video to a new aspect ratio. This re-encodes — scaling, cropping and
@@ -12,9 +16,6 @@ import { ASPECTS } from '../shared/types.ts'
 /** Visually lossless for practical purposes; 18 is the usual "can't tell" line. */
 const CRF = '17'
 const PRESET = 'medium'
-
-/** Codecs MP4 can hold as-is, so the audio never gets re-encoded. */
-const MP4_COPYABLE_AUDIO = new Set(['aac', 'mp3', 'ac3', 'eac3', 'alac'])
 
 export interface Size {
   width: number
@@ -83,16 +84,6 @@ export function buildVideoFilter(mode: FitMode, out: Size): string {
   }
 }
 
-/** Copy the audio when MP4 can hold it, so it stays bit-identical to the source. */
-export function audioArgs(codec: string | null): string[] {
-  if (!codec) return []
-  if (MP4_COPYABLE_AUDIO.has(codec.toLowerCase())) return ['-c:a', 'copy']
-  return ['-c:a', 'aac', '-b:a', '192k']
-}
-
-export function isAudioCopied(codec: string | null): boolean {
-  return codec !== null && MP4_COPYABLE_AUDIO.has(codec.toLowerCase())
-}
 
 export interface StretchArgsOptions {
   input: string

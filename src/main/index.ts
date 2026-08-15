@@ -3,6 +3,7 @@ import path from 'node:path'
 import { ensureExecutable } from './binaries.ts'
 import { fxQueue } from './fxqueue.ts'
 import { stretchQueue } from './stretchqueue.ts'
+import { upscaleQueue } from './upscalequeue.ts'
 import { bridgeQueueEvents, registerIpc } from './ipc.ts'
 import { log } from './logger.ts'
 import { buildMenu } from './menu.ts'
@@ -75,14 +76,25 @@ if (!app.requestSingleInstanceLock()) {
 let shuttingDown = false
 
 app.on('before-quit', (event) => {
-  if (shuttingDown || (!queue.hasActive() && !fxQueue.hasActive() && !stretchQueue.hasActive())) return
+  if (
+    shuttingDown ||
+    (!queue.hasActive() &&
+      !fxQueue.hasActive() &&
+      !stretchQueue.hasActive() &&
+      !upscaleQueue.hasActive())
+  ) {
+    return
+  }
   // Give the children a chance to die and their part files a chance to go with them.
   event.preventDefault()
   shuttingDown = true
   log('app', 'shutting down with work in flight')
-  void Promise.all([queue.shutdown(), fxQueue.shutdown(), stretchQueue.shutdown()]).finally(() =>
-    app.quit()
-  )
+  void Promise.all([
+    queue.shutdown(),
+    fxQueue.shutdown(),
+    stretchQueue.shutdown(),
+    upscaleQueue.shutdown()
+  ]).finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {

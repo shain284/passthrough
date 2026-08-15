@@ -48,6 +48,24 @@ const DENO = {
   linux: 'https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip'
 }
 
+/**
+ * Real-ESRGAN for the upscale tab. Required rather than optional — without it
+ * that tab cannot do anything. Small: ~6 MB binary plus ~13 MB of anime models.
+ */
+const REALESRGAN = {
+  win32: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip',
+  darwin: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-macos.zip',
+  linux: 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip'
+}
+
+/** Only the anime models ship; the photo ones are dead weight for this app. */
+const KEEP_MODELS = [
+  'realesr-animevideov3-x2',
+  'realesr-animevideov3-x3',
+  'realesr-animevideov3-x4',
+  'realesrgan-x4plus-anime'
+]
+
 const exeSuffix = platform === 'win32' ? '.exe' : ''
 
 async function exists(p) {
@@ -140,6 +158,45 @@ async function main() {
     }
   } else {
     process.stdout.write('  ffmpeg already present (pass --force to replace)\n')
+  }
+
+  const upscalerDest = path.join(outDir, `realesrgan-ncnn-vulkan${exeSuffix}`)
+  if (force || !(await exists(upscalerDest))) {
+    const workDir = await (await import('node:fs/promises')).mkdtemp(path.join(os.tmpdir(), 'esrgan-'))
+    const archive = path.join(workDir, 'realesrgan.zip')
+    try {
+      await download(REALESRGAN[platform], archive)
+      if (platform === 'win32') {
+        await execFileAsync('powershell', [
+          '-NoProfile',
+          '-Command',
+          `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${workDir}' -Force`
+        ])
+      } else {
+        await execFileAsync('unzip', ['-oq', archive, '-d', workDir])
+      }
+
+      const { copyFile, readdir: readDir } = await import('node:fs/promises')
+      const found = await readDir(workDir, { recursive: true, withFileTypes: true })
+      await mkdir(path.join(outDir, 'models'), { recursive: true })
+
+      for (const entry of found) {
+        if (!entry.isFile()) continue
+        const src = path.join(entry.parentPath ?? entry.path, entry.name)
+        // The binary, the OpenMP runtime it needs, and the anime models only.
+        if (entry.name === `realesrgan-ncnn-vulkan${exeSuffix}` || /^vcomp\d+\.dll$/i.test(entry.name)) {
+          await copyFile(src, path.join(outDir, entry.name))
+          if (platform !== 'win32') await chmod(path.join(outDir, entry.name), 0o755)
+        } else if (KEEP_MODELS.some((m) => entry.name.startsWith(m))) {
+          await copyFile(src, path.join(outDir, 'models', entry.name))
+        }
+      }
+      process.stdout.write(`  wrote ${upscalerDest} and models/\n`)
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
+  } else {
+    process.stdout.write('  realesrgan already present (pass --force to replace)\n')
   }
 
   const denoDest = path.join(outDir, `deno${exeSuffix}`)

@@ -699,3 +699,25 @@ button {
 ::-webkit-scrollbar-thumb:hover {
   background: #363c49;
 }
+
+/* Upscale row glyph + long-job warning ----------------------------------- */
+
+.upscale-glyph {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #1b2740;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.banner-warn {
+  background: #2a2418;
+  border-color: #4a3d22;
+  color: #e8cf9a;
+}

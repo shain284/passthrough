@@ -19,6 +19,10 @@ export const ffmpegPath = path.join(base, `ffmpeg${exe}`)
 export const ffprobePath = path.join(base, `ffprobe${exe}`)
 export const denoPath = path.join(base, `deno${exe}`)
 
+/** Real-ESRGAN and its models, for the upscale tab. */
+export const realesrganPath = path.join(base, `realesrgan-ncnn-vulkan${exe}`)
+export const modelsDir = path.join(base, 'models')
+
 /**
  * yt-dlp deprecated YouTube extraction without a JavaScript runtime — without one
  * some formats can go missing. It only auto-detects deno, and a clean machine has
@@ -43,7 +47,7 @@ export const ffmpegDir = base
  */
 export function ensureExecutable(): void {
   if (process.platform === 'win32') return
-  for (const p of [ytDlpPath, ffmpegPath, ffprobePath, denoPath]) {
+  for (const p of [ytDlpPath, ffmpegPath, ffprobePath, denoPath, realesrganPath]) {
     try {
       if (!fs.existsSync(p)) continue
       const mode = fs.statSync(p).mode & 0o777

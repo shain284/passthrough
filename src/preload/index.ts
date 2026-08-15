@@ -10,6 +10,8 @@ import type {
   StartRequest,
   StretchItem,
   StretchRequest,
+  UpscaleItem,
+  UpscaleRequest,
   UpdateResult,
   VideoMeta
 } from '../shared/types.ts'
@@ -74,6 +76,18 @@ const api: RendererApi = {
     ipcRenderer.invoke('stretch:showInFolder', id) as Promise<void>,
   onStretchUpdate: (cb) => subscribe<StretchItem>('stretch:update', cb),
   onStretchRemoved: (cb) => subscribe<string>('stretch:removed', cb),
+
+  pickVideoFilesForUpscale: () => ipcRenderer.invoke('upscale:pick') as Promise<string[]>,
+  listUpscale: () => ipcRenderer.invoke('upscale:list') as Promise<UpscaleItem[]>,
+  startUpscale: (req: UpscaleRequest) =>
+    ipcRenderer.invoke('upscale:start', req) as Promise<UpscaleItem[]>,
+  cancelUpscale: (id: string) => ipcRenderer.invoke('upscale:cancel', id) as Promise<void>,
+  retryUpscale: (id: string) => ipcRenderer.invoke('upscale:retry', id) as Promise<void>,
+  removeUpscale: (id: string) => ipcRenderer.invoke('upscale:remove', id) as Promise<void>,
+  showUpscaleInFolder: (id: string) =>
+    ipcRenderer.invoke('upscale:showInFolder', id) as Promise<void>,
+  onUpscaleUpdate: (cb) => subscribe<UpscaleItem>('upscale:update', cb),
+  onUpscaleRemoved: (cb) => subscribe<string>('upscale:removed', cb),
 
   // Electron 33 dropped File.path; this is the supported replacement and is the
   // only way a dropped file's real path reaches the main process.

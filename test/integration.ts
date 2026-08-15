@@ -9,7 +9,7 @@
  */
 import { strict as assert } from 'node:assert'
 import { spawn } from 'node:child_process'
-import { readdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, readdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import os from 'node:os'
 import path from 'node:path'
@@ -28,6 +28,16 @@ import { ASPECT_IDS, FIT_MODE_IDS } from '../src/shared/types.ts'
 import { buildDownloadArgs, FILE_PREFIX, POSTPROCESS_PREFIX } from '../src/main/formats.ts'
 import { MediaQueue } from '../src/main/mediaqueue.ts'
 import {
+  buildExtractArgs,
+  buildJoinArgs,
+  buildSegmentArgs,
+  buildUpscaleArgs,
+  mapUpscaleError,
+  parseUpscalePercent,
+  planChunks,
+  upscaledSize
+} from '../src/main/upscale.ts'
+import {
   audioArgs,
   buildStretchArgs,
   buildVideoFilter,
@@ -45,6 +55,8 @@ const exe = process.platform === 'win32' ? '.exe' : ''
 const ytDlp = path.join(binDir, `yt-dlp${exe}`)
 const ffmpeg = path.join(binDir, `ffmpeg${exe}`)
 const ffprobe = path.join(binDir, `ffprobe${exe}`)
+const realesrgan = path.join(binDir, `realesrgan-ncnn-vulkan${exe}`)
+const modelDirPath = path.join(binDir, 'models')
 const run = promisify(execFile)
 
 /** ~10 minutes of 4K60 — long enough that cancelling lands mid-stream. */
@@ -560,6 +572,166 @@ test(
         // The whole point of copying the audio: it must survive bit for bit.
         assert.equal(await audioMd5(out), sourceAudio, `${mode} altered the audio`)
       }
+    })
+  }
+)
+
+/* -- Neural upscaler ------------------------------------------------------ */
+
+test('chunk planning covers every frame exactly once', () => {
+  assert.deepEqual(planChunks(10, 4), [
+    { index: 0, startFrame: 0, frameCount: 4 },
+    { index: 1, startFrame: 4, frameCount: 4 },
+    { index: 2, startFrame: 8, frameCount: 2 }
+  ])
+  assert.deepEqual(planChunks(0, 4), [])
+
+  // Whatever the size, the parts must sum to the whole with no overlap.
+  for (const [total, size] of [[1, 300], [300, 300], [301, 300], [7919, 64]]) {
+    const chunks = planChunks(total!, size!)
+    assert.equal(
+      chunks.reduce((n, c) => n + c.frameCount, 0),
+      total,
+      `${total}/${size} frames do not sum`
+    )
+    chunks.forEach((c, i) => {
+      if (i > 0) {
+        const prev = chunks[i - 1]!
+        assert.equal(c.startFrame, prev.startFrame + prev.frameCount, 'gap or overlap')
+      }
+    })
+  }
+})
+
+test('upscaled size multiplies both dimensions and stays even', () => {
+  assert.deepEqual(upscaledSize({ width: 640, height: 480 }, 2), { width: 1280, height: 960 })
+  assert.deepEqual(upscaledSize({ width: 640, height: 480 }, 4), { width: 2560, height: 1920 })
+  // Odd sources must not produce odd output — yuv420p cannot encode it.
+  for (const f of [2, 3, 4] as const) {
+    const out = upscaledSize({ width: 353, height: 241 }, f)
+    assert.equal(out.width % 2, 0)
+    assert.equal(out.height % 2, 0)
+  }
+})
+
+test('upscale progress percentages parse and noise is ignored', () => {
+  assert.equal(parseUpscalePercent('12.50%'), 12.5)
+  assert.equal(parseUpscalePercent('  100.00%  '), 100)
+  assert.equal(parseUpscalePercent('0%'), 0)
+  assert.equal(parseUpscalePercent('vkAllocateMemory failed'), null)
+  assert.equal(parseUpscalePercent('120%'), null)
+  assert.equal(parseUpscalePercent(''), null)
+})
+
+test('upscale args seek per chunk and never resample the audio needlessly', () => {
+  const extract = buildExtractArgs({
+    input: '/in.mp4', startFrame: 600, frameCount: 300, fps: 24, outDir: '/tmp/x'
+  })
+  // Seek must come before -i or ffmpeg decodes and throws away everything prior.
+  assert.ok(extract.indexOf('-ss') < extract.indexOf('-i'), '-ss must precede -i')
+  assert.ok(extract.includes('25.000000'), '600 frames at 24fps is 25s')
+  assert.ok(extract.includes('passthrough'), 'must not resample the frame rate')
+
+  const model = buildUpscaleArgs({
+    inDir: '/a', outDir: '/b', factor: 3, modelDir: '/m'
+  })
+  assert.ok(model.includes('realesr-animevideov3'))
+  assert.ok(model.includes('-s') && model.includes('3'))
+  // Model dir must be explicit; the exe otherwise looks next to its own cwd.
+  assert.ok(model.includes('-m') && model.includes('/m'))
+
+  const join = buildJoinArgs({
+    listFile: '/l.txt', original: '/in.mp4', output: '/out.mp4', audioCodec: 'aac'
+  })
+  // Segments are already encoded — joining must copy, not re-encode.
+  assert.ok(join.join(' ').includes('-c:v copy'))
+  assert.ok(join.join(' ').includes('-c:a copy'))
+  assert.ok(join.join(' ').includes('-map 1:a:0?'))
+})
+
+test('upscale errors name the actual cause', () => {
+  assert.match(mapUpscaleError('vkCreateInstance failed', 1), /Vulkan/)
+  assert.match(mapUpscaleError('vkAllocateMemory out of memory', 1), /GPU ran out of memory/)
+  assert.match(mapUpscaleError('No space left on device', 1), /disk space/)
+  assert.match(mapUpscaleError('failed to load model', 1), /model failed to load/)
+  // A bare percentage is progress noise, not an error message.
+  assert.match(mapUpscaleError('50.00%\n', 1), /exit code 1/)
+})
+
+test(
+  'chunked upscaling loses no frames and keeps duration exact',
+  { timeout: 600_000 },
+  async () => {
+    await withTempDir(async (dir) => {
+      const src = path.join(dir, 'src.mp4')
+      // Small and short so this stays a test rather than a render job.
+      await run(ffmpeg, [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=24:duration=2',
+        '-f', 'lavfi', '-i', 'sine=f=440:r=48000:d=2',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-shortest', src
+      ])
+
+      const CHUNK = 20 // forces multiple chunks out of 48 frames
+      const segments: string[] = []
+      let extractedTotal = 0
+
+      for (let index = 0; ; index++) {
+        const srcDir = path.join(dir, `s${index}`)
+        const upDir = path.join(dir, `u${index}`)
+        await mkdir(srcDir); await mkdir(upDir)
+
+        await run(ffmpeg, buildExtractArgs({
+          input: src, startFrame: index * CHUNK, frameCount: CHUNK, fps: 24, outDir: srcDir
+        }))
+        const got = (await readdir(srcDir)).length
+        if (got === 0) break
+        extractedTotal += got
+
+        await run(realesrgan, buildUpscaleArgs({
+          inDir: srcDir, outDir: upDir, factor: 2, modelDir: modelDirPath
+        }), { maxBuffer: 16 * 1024 * 1024 })
+        assert.equal((await readdir(upDir)).length, got, `chunk ${index} lost frames`)
+
+        const seg = path.join(dir, `seg${String(index).padStart(5, '0')}.mp4`)
+        await run(ffmpeg, buildSegmentArgs({ frameDir: upDir, fps: 24, output: seg }))
+        segments.push(seg)
+        if (got < CHUNK) break
+      }
+
+      assert.ok(segments.length > 1, 'test must exercise the multi-chunk path')
+
+      const listFile = path.join(dir, 'list.txt')
+      await writeFile(
+        listFile,
+        segments.map((s) => `file '${s.replace(/\\/g, '/')}'`).join('\n'),
+        'utf8'
+      )
+      const out = path.join(dir, 'out.mp4')
+      await run(ffmpeg, buildJoinArgs({
+        listFile, original: src, output: out, audioCodec: 'aac'
+      }))
+
+      const probe = async (f: string): Promise<string> => {
+        const { stdout } = await run(ffprobe, [
+          '-v', 'error', '-select_streams', 'v:0',
+          '-count_frames', '-show_entries', 'stream=width,height,nb_read_frames',
+          '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', f
+        ], { maxBuffer: 8 * 1024 * 1024 })
+        return stdout.trim()
+      }
+      const [sw, sh, sFrames, sDur] = (await probe(src)).split(/\s+/)
+      const [ow, oh, oFrames, oDur] = (await probe(out)).split(/\s+/)
+
+      assert.equal(Number(ow), Number(sw) * 2, 'width must double')
+      assert.equal(Number(oh), Number(sh) * 2, 'height must double')
+      assert.equal(Number(oFrames), Number(sFrames), 'frame drift across chunks')
+      assert.equal(extractedTotal, Number(sFrames), 'extraction lost or duplicated frames')
+      assert.ok(
+        Math.abs(Number(oDur) - Number(sDur)) < 0.05,
+        `duration drifted: ${sDur} -> ${oDur}`
+      )
     })
   }
 )

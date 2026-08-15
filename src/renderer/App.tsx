@@ -3,13 +3,15 @@ import type { BinaryVersions, Settings } from '../shared/types.ts'
 import { DownloadPanel } from './DownloadPanel.tsx'
 import { FxPanel } from './FxPanel.tsx'
 import { StretchPanel } from './StretchPanel.tsx'
+import { UpscalePanel } from './UpscalePanel.tsx'
 
-type Tab = 'download' | 'fx' | 'stretch'
+type Tab = 'download' | 'fx' | 'stretch' | 'upscale'
 
 const TABS: { id: Tab; label: string; tagline: string }[] = [
   { id: 'download', label: 'Download', tagline: 'no re-encoding, ever' },
   { id: 'fx', label: 'Slowed + Reverb', tagline: 'renders a new file' },
-  { id: 'stretch', label: 'Stretch', tagline: 'reframes, re-encodes once' }
+  { id: 'stretch', label: 'Stretch', tagline: 'reframes, re-encodes once' },
+  { id: 'upscale', label: 'Upscale', tagline: 'slow, GPU, worth it' }
 ]
 
 export function App(): React.JSX.Element {
@@ -107,8 +109,10 @@ export function App(): React.JSX.Element {
         />
       ) : tab === 'fx' ? (
         <FxPanel settings={settings} onSettings={setSettings} onToast={setToast} />
-      ) : (
+      ) : tab === 'stretch' ? (
         <StretchPanel settings={settings} onSettings={setSettings} onToast={setToast} />
+      ) : (
+        <UpscalePanel settings={settings} onSettings={setSettings} onToast={setToast} />
       )}
     </div>
   )

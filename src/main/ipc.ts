@@ -6,12 +6,14 @@ import type {
   Settings,
   StretchRequest,
   StartRequest,
+  UpscaleRequest,
   UpdateResult
 } from '../shared/types.ts'
 import { FORMAT_IDS, FX_EXTENSIONS, VIDEO_EXTENSIONS } from '../shared/types.ts'
 import { ffmpegPath, ffmpegVersion, selfUpdate, ytDlpPath, ytDlpVersion } from './binaries.ts'
 import { fxQueue, isAcceptableAudioPath } from './fxqueue.ts'
 import { isAcceptableVideoPath, stretchQueue } from './stretchqueue.ts'
+import { isAcceptableVideoPathForUpscale, upscaleQueue } from './upscalequeue.ts'
 import { openLog } from './logger.ts'
 import { fetchMeta } from './metadata.ts'
 import { queue } from './queue.ts'
@@ -241,6 +243,56 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     }
     void shell.openPath(getSettings().outputDir)
   })
+
+  /* -- Neural upscaler ---------------------------------------------------- */
+
+  ipcMain.handle('upscale:pick', async (): Promise<string[]> => {
+    const win = getWindow()
+    const opts = {
+      title: 'Choose video clips to upscale',
+      properties: ['openFile' as const, 'multiSelections' as const],
+      filters: [
+        { name: 'Video', extensions: VIDEO_EXTENSIONS.map((e) => e.slice(1)) },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts)
+    if (result.canceled) return []
+    return result.filePaths.filter(isAcceptableVideoPathForUpscale)
+  })
+
+  ipcMain.handle('upscale:list', () => upscaleQueue.list())
+
+  ipcMain.handle('upscale:start', (_e, req: unknown) => {
+    if (typeof req !== 'object' || req === null) throw new Error('Bad request.')
+    const raw = req as Record<string, unknown>
+    if (!Array.isArray(raw.paths)) throw new Error('Bad request.')
+    if (raw.paths.length > 50) throw new Error('Too many files at once.')
+
+    const paths = raw.paths.filter(isAcceptableVideoPathForUpscale)
+    if (!paths.length) throw new Error('No supported video files in that selection.')
+
+    const upscaleReq: UpscaleRequest = {
+      paths,
+      factor: Number(raw.factor) as UpscaleRequest['factor']
+    }
+    return upscaleQueue.add(upscaleReq)
+  })
+
+  ipcMain.handle('upscale:cancel', (_e, id: unknown) => upscaleQueue.cancel(asId(id)))
+  ipcMain.handle('upscale:retry', (_e, id: unknown) => upscaleQueue.retry(asId(id)))
+  ipcMain.handle('upscale:remove', (_e, id: unknown) => upscaleQueue.remove(asId(id)))
+
+  ipcMain.handle('upscale:showInFolder', (_e, id: unknown) => {
+    const item = upscaleQueue.get(asId(id))
+    if (item?.filePath && fs.existsSync(item.filePath)) {
+      shell.showItemInFolder(item.filePath)
+      return
+    }
+    void shell.openPath(getSettings().outputDir)
+  })
 }
 
 /** Wires queue events to the renderer. Called once the window exists. */
@@ -269,8 +321,17 @@ export function bridgeQueueEvents(win: BrowserWindow): void {
   queue.on('removed', onRemoved)
   fxQueue.on('update', onFxUpdate)
   fxQueue.on('removed', onFxRemoved)
+  const onUpscaleUpdate = (item: unknown): void => {
+    if (!win.isDestroyed()) win.webContents.send('upscale:update', item)
+  }
+  const onUpscaleRemoved = (id: string): void => {
+    if (!win.isDestroyed()) win.webContents.send('upscale:removed', id)
+  }
+
   stretchQueue.on('update', onStretchUpdate)
   stretchQueue.on('removed', onStretchRemoved)
+  upscaleQueue.on('update', onUpscaleUpdate)
+  upscaleQueue.on('removed', onUpscaleRemoved)
 
   win.on('closed', () => {
     queue.off('update', onUpdate)
@@ -279,5 +340,7 @@ export function bridgeQueueEvents(win: BrowserWindow): void {
     fxQueue.off('removed', onFxRemoved)
     stretchQueue.off('update', onStretchUpdate)
     stretchQueue.off('removed', onStretchRemoved)
+    upscaleQueue.off('update', onUpscaleUpdate)
+    upscaleQueue.off('removed', onUpscaleRemoved)
   })
 }

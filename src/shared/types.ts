@@ -172,6 +172,54 @@ export interface StretchRequest {
   mode: FitMode
 }
 
+/* -- Neural upscaler ------------------------------------------------------ */
+
+export type UpscaleFactor = 2 | 3 | 4
+
+export const UPSCALE_FACTORS: UpscaleFactor[] = [2, 3, 4]
+
+export const UPSCALE_DEFAULTS = { factor: 2 as UpscaleFactor }
+
+/** Past this, a clip stops being a clip. Used to warn, not to block. */
+export const UPSCALE_LONG_CLIP_SECONDS = 120
+
+export type UpscaleStatus = 'queued' | 'rendering' | 'done' | 'error' | 'canceled'
+
+export interface UpscaleItem {
+  id: string
+  inputPath: string
+  fileName: string
+  status: UpscaleStatus
+
+  factor: UpscaleFactor
+
+  sourceWidth?: number
+  sourceHeight?: number
+  outputWidth?: number
+  outputHeight?: number
+  durationSeconds?: number
+  frameCount?: number
+  audioCopied?: boolean
+
+  /** Frames actually upscaled so far, across all chunks. */
+  framesDone?: number
+  /** Frames/sec being achieved right now — measured, not estimated. */
+  measuredFps?: number
+  /** Seconds remaining. Starts as an estimate, becomes measured. */
+  etaSeconds?: number
+  /** True until a chunk has completed and the rate is real. */
+  etaIsEstimate?: boolean
+
+  filePath?: string
+  error?: string
+  createdAt: number
+}
+
+export interface UpscaleRequest {
+  paths: string[]
+  factor: UpscaleFactor
+}
+
 export interface BinaryVersions {
   ytDlp: string | null
   ffmpeg: string | null
@@ -241,6 +289,17 @@ export interface RendererApi {
   showStretchInFolder(id: string): Promise<void>
   onStretchUpdate(cb: (item: StretchItem) => void): () => void
   onStretchRemoved(cb: (id: string) => void): () => void
+
+  /* Neural upscaler */
+  pickVideoFilesForUpscale(): Promise<string[]>
+  listUpscale(): Promise<UpscaleItem[]>
+  startUpscale(req: UpscaleRequest): Promise<UpscaleItem[]>
+  cancelUpscale(id: string): Promise<void>
+  retryUpscale(id: string): Promise<void>
+  removeUpscale(id: string): Promise<void>
+  showUpscaleInFolder(id: string): Promise<void>
+  onUpscaleUpdate(cb: (item: UpscaleItem) => void): () => void
+  onUpscaleRemoved(cb: (id: string) => void): () => void
 
   /** Electron 33 removed File.path; drag-and-drop needs webUtils instead. */
   getPathForFile(file: File): string

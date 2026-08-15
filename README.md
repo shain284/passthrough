@@ -5,6 +5,7 @@ A local desktop app for sourcing and reframing media. Three tabs:
 - **Download** — paste a YouTube or TikTok link, save it as MP4 or audio. The video stream is never re-encoded.
 - **Slowed + Reverb** — drop audio in, get a slowed, pitched-down, reverbed MP3 out.
 - **Stretch** — drop video in, reframe it to 9:16, 1:1, 4:5 or 16:9.
+- **Upscale** — drop a clip in, upscale it 2–4× with Real-ESRGAN's anime model.
 
 Everything runs on your machine. No account, no server, no telemetry.
 
@@ -26,7 +27,17 @@ Only the Download tab can honestly make it, and it does:
 - **Audio (original)** passes the source bytes through untouched. Verified by comparing the audio-stream MD5 of the output against the raw source — identical.
 - The MP3 buttons *do* re-encode, and the UI says so.
 
-The other two tabs are renders, not copies. Slowing and convolution reverb, or scaling and cropping, touch every sample and every pixel; there's no `-c copy` path for either. Both tabs say so plainly. The Stretch tab does still copy the **audio** untouched whenever MP4 can hold the codec.
+The other three tabs are renders, not copies. Slowing and convolution reverb, scaling and cropping, or neural upscaling all touch every sample and every pixel; there's no `-c copy` path for any of them. Each tab says so plainly. Stretch and Upscale do still copy the **audio** untouched whenever MP4 can hold the codec.
+
+## About the Upscale tab
+
+It runs Real-ESRGAN's `realesr-animevideov3` model on the GPU via Vulkan, which reconstructs line art and flat colour rather than just enlarging pixels — well suited to older cel animation, much less so to live action.
+
+It is slow, and how slow depends entirely on your GPU. Measured on an integrated Radeon 780M at 640×480: **~3 fps at 2×**, so roughly four minutes per thirty seconds of footage. A discrete card is typically 10–20× faster. **This tab is built for clips.** A full 24-minute episode is several hours.
+
+Frames are processed in chunks of 300 rather than all at once. Extracting a whole episode's frames at 4× would need ~190 GB of intermediate PNGs; chunking holds scratch space to a couple of GB regardless of input length, and the scratch directory is removed on completion, cancel, or quit.
+
+Only one upscale runs at a time. The GPU is the bottleneck, so running two would just halve each and make both ETAs meaningless. The first ETA is an estimate scaled from that reference measurement; once a chunk completes, the row switches to the rate actually being achieved.
 
 ## Building it yourself
 
