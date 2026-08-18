@@ -168,7 +168,13 @@ test('stderr maps to plain English with the right offered action', () => {
     ['ERROR: [TikTok] x: No video formats found!', 'none'],
     ['ERROR: unable to extract player response; please report this issue', 'update-ytdlp'],
     ['ERROR: unable to download video data: The read operation timed out', 'retry'],
-    ['ERROR: [youtube] x: HTTP Error 429: Too Many Requests', 'retry']
+    ['ERROR: [youtube] x: HTTP Error 429: Too Many Requests', 'retry'],
+    // A 403 partway through a transfer means a stale extractor, not a bad video,
+    // so the row must offer the update rather than a pointless retry.
+    ['ERROR: unable to download video data: HTTP Error 403: Forbidden', 'update-ytdlp'],
+    // Chrome's app-bound encryption: closing Chrome does not help, so the row
+    // must not suggest it.
+    ['ERROR: Failed to decrypt with DPAPI. See  https://github.com/yt-dlp/yt-dlp/issues/10927', 'none']
   ]
   for (const [stderr, action] of cases) {
     const mapped = mapError(stderr, 1)
@@ -179,6 +185,11 @@ test('stderr maps to plain English with the right offered action', () => {
 
   // Unknown errors still surface something specific rather than a shrug.
   assert.match(mapError('ERROR: something entirely new happened', 1).message, /something entirely new/)
+
+  // The DPAPI advice must name a browser that works, not tell them to retry.
+  const dpapi = mapError('ERROR: Failed to decrypt with DPAPI', 1)
+  assert.match(dpapi.message, /Firefox/)
+  assert.ok(!/close/i.test(dpapi.message), 'closing Chrome does not fix app-bound encryption')
 
   assert.ok(isRemuxFailure('ERROR: Postprocessing: Conversion failed! (remux to mp4)'))
   assert.ok(!isRemuxFailure('ERROR: Video unavailable'))

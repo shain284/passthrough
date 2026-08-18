@@ -105,10 +105,18 @@ export async function ffmpegVersion(): Promise<string | null> {
   }
 }
 
-/** yt-dlp -U. Self-updates the binary in place; needs write access to resources/bin. */
+/**
+ * Updates yt-dlp in place, pinned to the nightly channel.
+ *
+ * Not `-U`: that stays on stable, and stable lags badly. YouTube changes its
+ * player every few weeks and the fixes land in nightly first — a stable build
+ * six weeks old was 403-ing partway through downloads that nightly handled
+ * fine. `--update-to nightly` both switches the channel and updates, so later
+ * runs stay on nightly.
+ */
 export async function selfUpdate(): Promise<{ ok: boolean; output: string }> {
   try {
-    const out = await run(ytDlpPath, ['-U'], 120000)
+    const out = await run(ytDlpPath, ['--update-to', 'nightly'], 180000)
     return { ok: true, output: out || 'yt-dlp is up to date.' }
   } catch (e) {
     return { ok: false, output: e instanceof Error ? e.message : String(e) }

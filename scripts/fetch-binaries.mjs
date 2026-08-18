@@ -25,10 +25,12 @@ const root = path.resolve(import.meta.dirname, '..')
 const platform = process.platform
 const outDir = path.join(root, 'resources', 'bin', platform)
 
+// Nightly, not stable. Stable lags YouTube's player changes by weeks, which
+// shows up as 403s partway through downloads.
 const YT_DLP = {
-  win32: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
-  darwin: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos',
-  linux: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux'
+  win32: 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe',
+  darwin: 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp_macos',
+  linux: 'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp_linux'
 }
 
 const FFMPEG_ARCHIVE = {

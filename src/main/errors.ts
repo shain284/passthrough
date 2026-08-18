@@ -32,9 +32,19 @@ const RULES: Rule[] = [
     }
   },
   {
+    // Chrome's app-bound encryption (Chrome 127+) put cookies behind DPAPI in a
+    // way yt-dlp cannot unwrap. Closing Chrome does not help, so do not say it.
+    test: /failed to decrypt with dpapi|app-?bound|10927/i,
+    error: {
+      message:
+        'Chrome now encrypts its cookies in a way this cannot read. Use Firefox, or turn the cookie option off.',
+      action: 'none'
+    }
+  },
+  {
     test: /could not (copy|find) chrome cookie|failed to (decrypt|read).*cookie|unable to (open|read) cookie|permission denied.*cookies/i,
     error: {
-      message: 'Could not read Chrome cookies. Close Chrome completely and try again.',
+      message: 'Could not read browser cookies. Close the browser completely and try again.',
       action: 'retry'
     }
   },
@@ -100,7 +110,13 @@ const RULES: Rule[] = [
   },
   {
     test: /http error 40[34]|forbidden/i,
-    error: { message: 'The server refused the request (403). Retry, or turn on browser cookies.', action: 'retry' }
+    error: {
+      // A 403 partway through a transfer means YouTube served a URL the
+      // extractor negotiated and then rejected it — almost always a stale
+      // yt-dlp against a changed player, not a problem with the video.
+      message: 'YouTube refused this video’s stream. Run Check for updates — a stale extractor is the usual cause.',
+      action: 'update-ytdlp'
+    }
   },
   {
     test: /no space left|not enough space|disk (is )?full/i,
