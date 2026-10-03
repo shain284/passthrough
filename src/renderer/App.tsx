@@ -7,11 +7,11 @@ import { UpscalePanel } from './UpscalePanel.tsx'
 
 type Tab = 'download' | 'fx' | 'stretch' | 'upscale'
 
-const TABS: { id: Tab; label: string; tagline: string }[] = [
-  { id: 'download', label: 'Download', tagline: 'no re-encoding, ever' },
-  { id: 'fx', label: 'Slowed + Reverb', tagline: 'renders a new file' },
-  { id: 'stretch', label: 'Stretch', tagline: 'reframes, re-encodes once' },
-  { id: 'upscale', label: 'Upscale', tagline: 'slow, GPU, worth it' }
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'download', label: 'Download' },
+  { id: 'fx', label: 'Slowed + Reverb' },
+  { id: 'stretch', label: 'Stretch' },
+  { id: 'upscale', label: 'Upscale' }
 ]
 
 export function App(): React.JSX.Element {
@@ -56,14 +56,12 @@ export function App(): React.JSX.Element {
   }, [])
 
   const binariesMissing = versions !== null && (!versions.ytDlp || !versions.ffmpeg)
-  const tagline = TABS.find((t) => t.id === tab)?.tagline ?? ''
 
   return (
     <div className="app">
       <header className="header">
         <div className="brand">
           <span className="brand-name">Passthrough</span>
-          <span className="brand-sub">{tagline}</span>
         </div>
         <div className="header-right">
           <span className="dim small">
