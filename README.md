@@ -7,7 +7,7 @@ A free Windows app for grabbing and reworking video and audio for edits. Four ta
 - **Stretch** — reframe a video to 9:16, 1:1, 4:5 or 16:9.
 - **Upscale** — sharpen up older anime clips 2–4× with an AI model.
 
-Everything runs on your own computer. No account, no sign-up, nothing uploaded anywhere.
+Everything runs locally on your own computer
 
 ## Download
 
