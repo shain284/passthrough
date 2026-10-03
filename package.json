@@ -1,6 +1,6 @@
 {
   "name": "passthrough",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Save YouTube and TikTok videos as MP4 or MP3 without re-encoding the video stream",
   "main": "./out/main/index.js",
   "author": "shain284",

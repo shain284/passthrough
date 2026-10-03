@@ -186,9 +186,11 @@ test('stderr maps to plain English with the right offered action', () => {
   // Unknown errors still surface something specific rather than a shrug.
   assert.match(mapError('ERROR: something entirely new happened', 1).message, /something entirely new/)
 
-  // The DPAPI advice must name a browser that works, not tell them to retry.
+  // The DPAPI advice must point at something the app can actually do — it only
+  // reads Chrome, so suggesting another browser would be a dead end.
   const dpapi = mapError('ERROR: Failed to decrypt with DPAPI', 1)
-  assert.match(dpapi.message, /Firefox/)
+  assert.match(dpapi.message, /off/)
+  assert.ok(!/firefox/i.test(dpapi.message), 'the app has no Firefox option to switch to')
   assert.ok(!/close/i.test(dpapi.message), 'closing Chrome does not fix app-bound encryption')
 
   assert.ok(isRemuxFailure('ERROR: Postprocessing: Conversion failed! (remux to mp4)'))

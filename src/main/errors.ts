@@ -37,7 +37,7 @@ const RULES: Rule[] = [
     test: /failed to decrypt with dpapi|app-?bound|10927/i,
     error: {
       message:
-        'Chrome now encrypts its cookies in a way this cannot read. Use Firefox, or turn the cookie option off.',
+        'Chrome now encrypts its cookies in a way this app cannot read. Turn "Use browser cookies" off and retry.',
       action: 'none'
     }
   },

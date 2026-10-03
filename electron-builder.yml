@@ -38,10 +38,10 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Passthrough
-  artifactName: ${productName}-${version}-Setup.${ext}
+  artifactName: ${productName}-Setup.${ext}
 
 portable:
-  artifactName: ${productName}-${version}-Portable.${ext}
+  artifactName: ${productName}-Portable.${ext}
 
 mac:
   icon: build/icon.png
